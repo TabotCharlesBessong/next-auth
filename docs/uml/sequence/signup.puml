@@ -1,0 +1,24 @@
+@startuml signup_sequence
+
+participant Client
+participant "API Route" as API
+participant AuthService
+participant "User Repository" as UserRepo
+participant EmailService
+participant Database
+
+Client ->> API: POST /api/auth/register
+API ->> API: Validate input data
+API ->> AuthService: register(userData)
+AuthService ->> AuthService: Hash password
+AuthService ->> UserRepo: create(userData)
+UserRepo ->> Database: INSERT user
+Database -->> UserRepo: User created
+UserRepo -->> AuthService: User object
+AuthService ->> EmailService: sendVerificationEmail(user)
+EmailService -->> AuthService: Email sent
+AuthService ->> AuthService: Generate tokens
+AuthService -->> API: AuthResult
+API -->> Client: 201 Created + tokens
+
+@enduml

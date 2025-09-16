@@ -1,0 +1,54 @@
+@startuml class_repository
+
+    class IUserRepository {
+        <<interface>>
+        +create(userData: CreateUserData) Promise~User~
+        +findById(id: string) Promise~User~
+        +findByEmail(email: string) Promise~User~
+        +update(id: string, data: UpdateUserData) Promise~User~
+        +delete(id: string) Promise~void~
+        +findByProvider(provider: string, providerId: string) Promise~User~
+    }
+
+    class PostgreSQLUserRepository {
+        -prisma: PrismaClient
+        +create(userData: CreateUserData) Promise~User~
+        +findById(id: string) Promise~User~
+        +findByEmail(email: string) Promise~User~
+        +update(id: string, data: UpdateUserData) Promise~User~
+        +delete(id: string) Promise~void~
+        +findByProvider(provider: string, providerId: string) Promise~User~
+    }
+
+    class MySQLUserRepository {
+        -prisma: PrismaClient
+        +create(userData: CreateUserData) Promise~User~
+        +findById(id: string) Promise~User~
+        +findByEmail(email: string) Promise~User~
+        +update(id: string, data: UpdateUserData) Promise~User~
+        +delete(id: string) Promise~void~
+        +findByProvider(provider: string, providerId: string) Promise~User~
+    }
+
+    class MongoDBUserRepository {
+        -mongoose: Mongoose
+        +create(userData: CreateUserData) Promise~User~
+        +findById(id: string) Promise~User~
+        +findByEmail(email: string) Promise~User~
+        +update(id: string, data: UpdateUserData) Promise~User~
+        +delete(id: string) Promise~void~
+        +findByProvider(provider: string, providerId: string) Promise~User~
+    }
+
+    class RepositoryFactory {
+        +createUserRepository(dbType: DatabaseType) IUserRepository
+        +createTokenRepository(dbType: DatabaseType) ITokenRepository
+        +createSessionRepository(dbType: DatabaseType) ISessionRepository
+    }
+
+    IUserRepository <|.. PostgreSQLUserRepository
+    IUserRepository <|.. MySQLUserRepository
+    IUserRepository <|.. MongoDBUserRepository
+    RepositoryFactory --> IUserRepository
+
+@enduml

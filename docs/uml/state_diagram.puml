@@ -1,0 +1,31 @@
+@startuml state_diagram
+[*] --> Unauthenticated
+
+Unauthenticated --> Registering : Register
+Unauthenticated --> LoggingIn : Login
+Unauthenticated --> OAuthFlow : Social Login
+
+Registering --> EmailVerification : Registration Success
+Registering --> Unauthenticated : Registration Failed
+
+LoggingIn --> Authenticated : Login Success
+LoggingIn --> Unauthenticated : Login Failed
+
+OAuthFlow --> Authenticated : OAuth Success
+OAuthFlow --> Unauthenticated : OAuth Failed
+
+EmailVerification --> Authenticated : Email Verified
+EmailVerification --> Unauthenticated : Verification Failed
+
+Authenticated --> TokenRefreshing : Token Expired
+Authenticated --> Unauthenticated : Logout
+Authenticated --> Unauthenticated : Token Invalid
+
+TokenRefreshing --> Authenticated : Refresh Success
+TokenRefreshing --> Unauthenticated : Refresh Failed
+
+Authenticated --> PasswordReset : Forgot Password
+PasswordReset --> Authenticated : Password Reset Success
+PasswordReset --> Unauthenticated : Reset Failed
+
+@enduml

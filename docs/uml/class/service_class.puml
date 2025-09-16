@@ -1,0 +1,70 @@
+@startuml class_service
+
+    class IAuthService {
+        <<interface>>
+        +register(userData: RegisterData) Promise~User~
+        +login(credentials: LoginData) Promise~AuthResult~
+        +logout(token: string) Promise~void~
+        +refreshToken(refreshToken: string) Promise~TokenPair~
+        +verifyEmail(token: string) Promise~boolean~
+        +resetPassword(email: string) Promise~void~
+        +changePassword(userId: string, oldPassword: string, newPassword: string) Promise~void~
+    }
+
+    class AuthService {
+        -userRepository: IUserRepository
+        -tokenService: ITokenService
+        -emailService: IEmailService
+        -hashService: IHashService
+        +register(userData: RegisterData) Promise~User~
+        +login(credentials: LoginData) Promise~AuthResult~
+        +logout(token: string) Promise~void~
+        +refreshToken(refreshToken: string) Promise~TokenPair~
+        +verifyEmail(token: string) Promise~boolean~
+        +resetPassword(email: string) Promise~void~
+        +changePassword(userId: string, oldPassword: string, newPassword: string) Promise~void~
+    }
+
+    class IOAuthService {
+        <<interface>>
+        +getAuthUrl(provider: string, state: string) string
+        +handleCallback(provider: string, code: string, state: string) Promise~AuthResult~
+        +linkAccount(userId: string, provider: string, code: string) Promise~SocialAccount~
+        +unlinkAccount(userId: string, provider: string) Promise~void~
+    }
+
+    class OAuthService {
+        -providers: Map~string, IOAuthProvider~
+        -userRepository: IUserRepository
+        -tokenService: ITokenService
+        +getAuthUrl(provider: string, state: string) string
+        +handleCallback(provider: string, code: string, state: string) Promise~AuthResult~
+        +linkAccount(userId: string, provider: string, code: string) Promise~SocialAccount~
+        +unlinkAccount(userId: string, provider: string) Promise~void~
+    }
+
+    class ITokenService {
+        <<interface>>
+        +generateAccessToken(user: User) string
+        +generateRefreshToken(user: User) string
+        +verifyToken(token: string) TokenPayload
+        +revokeToken(token: string) Promise~void~
+        +cleanupExpiredTokens() Promise~void~
+    }
+
+    class TokenService {
+        -jwtSecret: string
+        -accessTokenExpiry: string
+        -refreshTokenExpiry: string
+        +generateAccessToken(user: User) string
+        +generateRefreshToken(user: User) string
+        +verifyToken(token: string) TokenPayload
+        +revokeToken(token: string) Promise~void~
+        +cleanupExpiredTokens() Promise~void~
+    }
+
+    IAuthService <|.. AuthService
+    IOAuthService <|.. OAuthService
+    ITokenService <|.. TokenService
+
+@enduml
