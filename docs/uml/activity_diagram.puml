@@ -1,0 +1,44 @@
+@startuml activity_diagram
+
+start
+
+:User Action;
+
+if (Register?) then (yes)
+  :Validate Registration Data;
+  if (Validation Success?) then (yes)
+    :Hash Password;
+    :Create User Account;
+    :Send Verification Email;
+    :Generate Tokens;
+    :Return Success Response;
+  else (no)
+    :Return Validation Errors;
+  endif
+elseif (Login?) then (yes)
+  :Validate Login Data;
+  if (Credentials Valid?) then (yes)
+    :Generate Tokens;
+    :Return Success Response;
+  else (no)
+    :Return Authentication Error;
+  endif
+elseif (Social Login?) then (yes)
+  :Redirect to OAuth Provider;
+  :User Authorizes;
+  :Receive Authorization Code;
+  :Exchange Code for User Info;
+  if (User Exists?) then (yes)
+    :Update User Info;
+    :Generate Tokens;
+    :Return Success Response;
+  else (no)
+    :Create New User;
+    :Generate Tokens;
+    :Return Success Response;
+  endif
+endif
+
+stop
+
+@enduml
