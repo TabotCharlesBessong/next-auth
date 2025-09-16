@@ -1,0 +1,35 @@
+@startuml oauth_sequence
+
+participant Client
+participant "API Route" as API
+participant OAuthService
+participant "OAuth Provider" as Provider
+participant "User Repository" as UserRepo
+participant Database
+
+Client->>API: GET /api/auth/oauth/google
+API->>OAuthService: getAuthUrl('google', state)
+OAuthService-->>API: Authorization URL
+API-->>Client: Redirect to OAuth provider
+Client->>Provider: Authorization request
+Provider-->>Client: Redirect with code
+Client->>API: GET /api/auth/oauth/callback?code=xxx
+API->>OAuthService: handleCallback('google', code, state)
+OAuthService->>Provider: Exchange code for tokens
+Provider-->>OAuthService: Access token + user info
+OAuthService->>UserRepo: findByProvider('google', providerId)
+UserRepo->>Database: SELECT user
+alt User exists
+    Database-->>UserRepo: Existing user
+    UserRepo-->>OAuthService: User object
+else User doesn't exist
+    Database-->>UserRepo: null
+    OAuthService->>UserRepo: create(userData)
+    UserRepo->>Database: INSERT user
+    Database-->>UserRepo: New user
+    UserRepo-->>OAuthService: User object
+end
+OAuthService->>OAuthService: Generate tokens
+OAuthService-->>API: AuthResult
+API-->>Client: Redirect to app + tokens
+@enduml

@@ -1,0 +1,25 @@
+@startuml login_sequence
+
+participant Client
+participant "API Route" as API
+participant AuthService
+participant "User Repository" as UserRepo
+participant TokenService
+participant Database
+
+Client ->> API: POST /api/auth/login
+API ->> API: Validate credentials
+API ->> AuthService: login(credentials)
+AuthService ->> UserRepo: findByEmail(email)
+UserRepo ->> Database: SELECT user
+Database -->> UserRepo: User data
+UserRepo -->> AuthService: User object
+AuthService ->> AuthService: Verify password
+AuthService ->> TokenService: generateTokens(user)
+TokenService -->> AuthService: Token pair
+AuthService ->> UserRepo: updateLastLogin(userId)
+UserRepo ->> Database: UPDATE user
+AuthService -->> API: AuthResult
+API -->> Client: 200 OK + tokens
+
+@enduml
