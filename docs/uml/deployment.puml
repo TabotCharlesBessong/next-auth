@@ -1,0 +1,77 @@
+@startuml deployment_diagram
+
+package "Client Tier" {
+  [Web Browser] as A
+  [Mobile App] as B
+}
+
+package "CDN" {
+  [Static Assets] as C
+}
+
+package "Load Balancer" {
+  [Nginx/ALB] as D
+}
+
+package "Application Tier" {
+  [Next.js App 1] as E
+  [Next.js App 2] as F
+  [Next.js App N] as G
+}
+
+package "Cache Layer" {
+  [(Redis Cluster)] as H
+}
+
+package "Database Tier" {
+  [(Primary DB)] as I
+  [(Read Replica)] as J
+}
+
+package "External Services" {
+  [OAuth Providers] as K
+  [Email Service] as L
+  [Monitoring] as M
+}
+
+package "Security" {
+  [WAF] as N
+  [SSL/TLS] as O
+}
+
+A --> C
+A --> N
+B --> N
+N --> O
+O --> D
+
+D --> E
+D --> F
+D --> G
+
+E --> H
+F --> H
+G --> H
+
+E --> I
+F --> I
+G --> I
+
+E --> J
+F --> J
+G --> J
+
+E --> K
+F --> K
+G --> K
+
+E --> L
+F --> L
+G --> L
+
+E --> M
+F --> M
+G --> M
+
+
+@enduml

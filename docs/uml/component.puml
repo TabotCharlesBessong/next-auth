@@ -1,0 +1,72 @@
+@startuml component_diagram
+package "Frontend Layer" {
+  [Authentication Pages] as A
+  [Protected Routes] as B
+  [Auth Components] as C
+  [Auth Context] as D
+}
+
+package "API Layer" {
+  [Auth Controllers] as E
+  [Middleware Stack] as F
+  [Input Validation] as G
+}
+
+package "Service Layer" {
+  [Auth Service] as H
+  [OAuth Service] as I
+  [Token Service] as J
+  [Email Service] as K
+  [User Service] as L
+}
+
+package "Data Access Layer" {
+  [Repository Factory] as M
+  [User Repository] as N
+  [Token Repository] as O
+  [Session Repository] as P
+}
+
+package "Database Layer" {
+  [(PostgreSQL)] as Q
+  [(MySQL)] as R
+  [(MongoDB)] as S
+}
+
+package "External Services" {
+  [OAuth Providers] as T
+  [Email Providers] as U
+  [Redis Cache] as V
+}
+
+A --> E
+B --> F
+C --> D
+D --> E
+
+E --> H
+E --> I
+F --> G
+
+H --> J
+H --> K
+H --> L
+I --> T
+K --> U
+
+H --> M
+I --> M
+L --> M
+
+M --> N
+M --> O
+M --> P
+
+N --> Q
+N --> R
+N --> S
+
+F --> V
+J --> V
+
+@enduml
