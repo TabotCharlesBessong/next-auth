@@ -1,11 +1,46 @@
 import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
 import { DatabaseFactory } from '../DatabaseFactory';
-import { DatabaseProvider, DatabaseConfig } from '../types';
-// import { DatabasePresets } from '../config/database.config';
+import { DatabaseProvider, DatabaseConfig, DatabaseConnection } from '../types';
+import { DatabasePresets } from '../config/database.config';
 
 // Mock the database connections
 jest.mock('../sequelize/SequelizeConnection');
 jest.mock('../mongoose/MongooseConnection');
+
+// Import the mocked classes
+import { SequelizeConnection } from '../sequelize/SequelizeConnection';
+import { MongooseConnection } from '../mongoose/MongooseConnection';
+
+// Create mock implementations
+const mockSequelizeConnection = SequelizeConnection as jest.MockedClass<typeof SequelizeConnection>;
+const mockMongooseConnection = MongooseConnection as jest.MockedClass<typeof MongooseConnection>;
+
+// Setup default mock implementations
+mockSequelizeConnection.mockImplementation(() => ({
+  connect: jest.fn().mockResolvedValue(undefined),
+  disconnect: jest.fn().mockResolvedValue(undefined),
+  isConnected: jest.fn().mockReturnValue(true),
+  getConnection: jest.fn().mockReturnValue({}),
+  transaction: jest.fn().mockImplementation((callback) => callback({})),
+  migrate: jest.fn().mockResolvedValue(undefined),
+  seed: jest.fn().mockResolvedValue(undefined),
+  drop: jest.fn().mockResolvedValue(undefined),
+  healthCheck: jest.fn().mockResolvedValue(true),
+  getStats: jest.fn().mockResolvedValue({})
+} as DatabaseConnection));
+
+mockMongooseConnection.mockImplementation(() => ({
+  connect: jest.fn().mockResolvedValue(undefined),
+  disconnect: jest.fn().mockResolvedValue(undefined),
+  isConnected: jest.fn().mockReturnValue(true),
+  getConnection: jest.fn().mockReturnValue({}),
+  transaction: jest.fn().mockImplementation((callback) => callback({})),
+  migrate: jest.fn().mockResolvedValue(undefined),
+  seed: jest.fn().mockResolvedValue(undefined),
+  drop: jest.fn().mockResolvedValue(undefined),
+  healthCheck: jest.fn().mockResolvedValue(true),
+  getStats: jest.fn().mockResolvedValue({})
+} as DatabaseConnection));
 
 describe('DatabaseFactory', () => {
   let factory: DatabaseFactory;
@@ -163,7 +198,7 @@ describe('DatabaseFactory', () => {
     });
 
     it('should execute transaction successfully', async () => {
-      const result = await factory.transaction(async (_trx) => {
+      const result = await factory.transaction(async () => {
         // Mock transaction operations
         return { success: true };
       });
@@ -173,7 +208,7 @@ describe('DatabaseFactory', () => {
 
     it('should rollback transaction on error', async () => {
       await expect(
-        factory.transaction(async (_trx) => {
+        factory.transaction(async () => {
           throw new Error('Transaction error');
         })
       ).rejects.toThrow('Transaction error');
@@ -196,7 +231,21 @@ describe('DatabaseFactory', () => {
         port: 99999
       };
       
-      await expect(factory.initialize(invalidConfig)).rejects.toThrow();
+      // Mock the connection to throw an error for invalid config
+      mockSequelizeConnection.mockImplementationOnce(() => ({
+        connect: jest.fn().mockRejectedValue(new Error('Connection failed')),
+        disconnect: jest.fn().mockResolvedValue(undefined),
+        isConnected: jest.fn().mockReturnValue(false),
+        getConnection: jest.fn().mockReturnValue(null),
+        transaction: jest.fn().mockImplementation((callback) => callback({})),
+        migrate: jest.fn().mockResolvedValue(undefined),
+        seed: jest.fn().mockResolvedValue(undefined),
+        drop: jest.fn().mockResolvedValue(undefined),
+        healthCheck: jest.fn().mockResolvedValue(false),
+        getStats: jest.fn().mockResolvedValue({})
+      } as DatabaseConnection));
+      
+      await expect(factory.initialize(invalidConfig)).rejects.toThrow('Connection failed');
     });
   });
 
