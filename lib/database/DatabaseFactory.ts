@@ -21,6 +21,7 @@ export class DatabaseFactory {
     session: SessionRepository;
     socialAccount: SocialAccountRepository;
   }> = new Map();
+  private currentConfig: DatabaseConfig | null = null;
 
   private constructor() {}
 
@@ -86,7 +87,7 @@ export class DatabaseFactory {
     }
 
     // Get or create connection
-    const _connection = await this.createConnection(config);
+    await this.createConnection(config);
     
     let repositories: {
       user: UserRepository;
@@ -165,9 +166,180 @@ export class DatabaseFactory {
     );
     
     await Promise.all(closePromises);
-    
     this.connections.clear();
     this.repositories.clear();
+  }
+
+  /**
+   * Disconnect from database (alias for closeAllConnections)
+   */
+  async disconnect(): Promise<void> {
+    await this.closeAllConnections();
+  }
+
+  /**
+   * Initialize the factory with a configuration
+   */
+  async initialize(config: DatabaseConfig): Promise<void> {
+    this.validateConfig(config);
+    await this.createConnection(config);
+    await this.createRepositories(config);
+    this.currentConfig = config;
+  }
+
+  /**
+   * Get the current database provider
+   */
+  getProvider(): DatabaseProvider | null {
+    return this.currentConfig?.provider || null;
+  }
+
+  /**
+   * Check if the factory is connected to a database
+   */
+  isConnected(): boolean {
+    if (!this.currentConfig) return false;
+    const connection = this.getConnection(this.currentConfig);
+    return connection !== null;
+  }
+
+  /**
+   * Reconnect to the database
+   */
+  async reconnect(): Promise<void> {
+    if (!this.currentConfig) {
+      throw new Error('No configuration available for reconnection');
+    }
+    await this.disconnect();
+    await this.initialize(this.currentConfig);
+  }
+
+  /**
+   * Perform a health check
+   */
+  async healthCheck(): Promise<{ status: string; provider: string; timestamp: Date }> {
+    if (!this.currentConfig) {
+      return {
+        status: 'disconnected',
+        provider: 'none',
+        timestamp: new Date()
+      };
+    }
+
+    try {
+      const isHealthy = await this.checkHealth(this.currentConfig);
+      return {
+        status: isHealthy ? 'healthy' : 'unhealthy',
+        provider: this.currentConfig.provider,
+        timestamp: new Date()
+      };
+    } catch {
+      return {
+        status: 'error',
+        provider: this.currentConfig.provider,
+        timestamp: new Date()
+      };
+    }
+  }
+
+  /**
+   * Run migrations (alias for runMigrations)
+   */
+  async migrate(): Promise<void> {
+    if (!this.currentConfig) {
+      throw new Error('Database not initialized. Call initialize() first.');
+    }
+    await this.runMigrations(this.currentConfig);
+  }
+
+  /**
+   * Rollback migrations
+   */
+  async rollback(): Promise<void> {
+    if (!this.currentConfig) {
+      throw new Error('Database not initialized. Call initialize() first.');
+    }
+    // For now, this is a placeholder - actual rollback implementation would depend on the migration system
+    console.log('Rollback migrations - placeholder implementation');
+  }
+
+  /**
+   * Seed database (alias for runSeeds)
+   */
+  async seed(): Promise<void> {
+    if (!this.currentConfig) {
+      throw new Error('Database not initialized. Call initialize() first.');
+    }
+    await this.runSeeds(this.currentConfig);
+  }
+
+  /**
+   * Execute a database transaction
+   */
+  async transaction<T>(callback: (trx: import('sequelize').Transaction | import('mongoose').ClientSession) => Promise<T>): Promise<T> {
+    if (!this.currentConfig) {
+      throw new Error('Database not initialized. Call initialize() first.');
+    }
+    
+    const connection = this.getConnection(this.currentConfig);
+    if (!connection) {
+      throw new Error('No active database connection');
+    }
+
+    // For now, this is a simplified implementation
+    // In a real implementation, this would use the actual transaction API of the database
+    try {
+      const result = await callback(null); // Mock transaction object
+      return result;
+    } catch (error) {
+      // In a real implementation, this would rollback the transaction
+      throw error;
+    }
+  }
+
+  /**
+   * Get user repository for the default configuration
+   */
+  getUserRepository(config?: DatabaseConfig): UserRepository {
+    if (!config && !this.currentConfig) {
+      throw new Error('Database not initialized. Call initialize() first.');
+    }
+    const dbConfig = config || this.currentConfig!;
+    const repositories = this.getRepositories(dbConfig);
+    if (!repositories) {
+      throw new Error('Database not initialized. Call initialize() first.');
+    }
+    return repositories.user;
+  }
+
+  /**
+   * Get session repository for the default configuration
+   */
+  getSessionRepository(config?: DatabaseConfig): SessionRepository {
+    if (!config && !this.currentConfig) {
+      throw new Error('Database not initialized. Call initialize() first.');
+    }
+    const dbConfig = config || this.currentConfig!;
+    const repositories = this.getRepositories(dbConfig);
+    if (!repositories) {
+      throw new Error('Database not initialized. Call initialize() first.');
+    }
+    return repositories.session;
+  }
+
+  /**
+   * Get social account repository for the default configuration
+   */
+  getSocialAccountRepository(config?: DatabaseConfig): SocialAccountRepository {
+    if (!config && !this.currentConfig) {
+      throw new Error('Database not initialized. Call initialize() first.');
+    }
+    const dbConfig = config || this.currentConfig!;
+    const repositories = this.getRepositories(dbConfig);
+    if (!repositories) {
+      throw new Error('Database not initialized. Call initialize() first.');
+    }
+    return repositories.socialAccount;
   }
 
   /**
