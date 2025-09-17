@@ -23,7 +23,7 @@ export class MongooseSessionRepository extends AbstractBaseRepository<Session> i
       this.validateRequiredFields(data, ['userId', 'token']);
       
       // Validate token format
-      if (data.token && !this.validateToken(data.token)) {
+      if (data.token && !this.validateTokenFormat(data.token)) {
         throw new ValidationError('Invalid token format', 'token', data.token);
       }
 
@@ -70,7 +70,7 @@ export class MongooseSessionRepository extends AbstractBaseRepository<Session> i
    */
   async findByToken(token: string): Promise<Session | null> {
     try {
-      if (!this.validateToken(token)) {
+      if (!this.validateTokenFormat(token)) {
         return null;
       }
 
@@ -273,7 +273,7 @@ export class MongooseSessionRepository extends AbstractBaseRepository<Session> i
    */
   async validateToken(token: string): Promise<Session | null> {
     try {
-      if (!this.validateToken(token)) {
+      if (!this.validateTokenFormat(token)) {
         return null;
       }
 
@@ -389,24 +389,6 @@ export class MongooseSessionRepository extends AbstractBaseRepository<Session> i
   }
 
   /**
-   * Cleans up expired sessions
-   */
-  async cleanupExpiredSessions(): Promise<number> {
-    try {
-      const result = await this.sessionModel.deleteMany({
-        $or: [
-          { expiresAt: { $lt: new Date() } },
-          { isActive: false, updatedAt: { $lt: this.getCleanupDate() } }
-        ]
-      }).exec();
-
-      return result.deletedCount;
-    } catch (error) {
-      this.handleDatabaseError(error, 'cleanup expired sessions');
-    }
-  }
-
-  /**
    * Gets active sessions for a user
    */
   async getActiveSessions(userId: string, options?: QueryOptions): Promise<Session[]> {
@@ -474,6 +456,69 @@ export class MongooseSessionRepository extends AbstractBaseRepository<Session> i
   }
 
   /**
+   * Finds active sessions by user ID (required by SessionRepository interface)
+   */
+  async findActiveByUserId(userId: string): Promise<Session[]> {
+    try {
+      if (!this.validateUUID(userId)) {
+        return [];
+      }
+
+      const sessions = await this.sessionModel.find({
+        userId,
+        isActive: true,
+        expiresAt: { $gt: new Date() }
+      }).sort({ lastAccessedAt: -1 }).exec();
+
+      return sessions.map(session => this.mapDocumentToEntity(session));
+    } catch (error) {
+      this.handleDatabaseError(error, 'find active sessions by user id');
+    }
+  }
+
+  /**
+   * Invalidates user sessions (required by SessionRepository interface)
+   */
+  async invalidateUserSessions(userId: string): Promise<void> {
+    try {
+      if (!this.validateUUID(userId)) {
+        return;
+      }
+
+      await this.sessionModel.updateMany(
+        { userId, isActive: true },
+        { 
+          $set: { 
+            isActive: false,
+            revokedAt: this.getCurrentTimestamp(),
+            updatedAt: this.getCurrentTimestamp()
+          }
+        }
+      ).exec();
+    } catch (error) {
+      this.handleDatabaseError(error, 'invalidate user sessions');
+    }
+  }
+
+  /**
+   * Cleans up expired sessions (required by SessionRepository interface)
+   */
+  async cleanupExpiredSessions(): Promise<number> {
+    try {
+      const result = await this.sessionModel.deleteMany({
+        $or: [
+          { expiresAt: { $lt: new Date() } },
+          { isActive: false, updatedAt: { $lt: this.getCleanupDate() } }
+        ]
+      }).exec();
+
+      return result.deletedCount;
+    } catch (error) {
+      this.handleDatabaseError(error, 'cleanup expired sessions');
+    }
+  }
+
+  /**
    * Builds Mongoose filter from generic where clause
    */
   private buildMongooseFilter(where: WhereClause): FilterQuery<SessionDocument> {
@@ -484,29 +529,30 @@ export class MongooseSessionRepository extends AbstractBaseRepository<Session> i
         filter[key] = value;
       } else if (Array.isArray(value)) {
         filter[key] = { $in: value };
-      } else if (typeof value === 'object' && value.operator) {
+      } else if (typeof value === 'object' && value !== null && 'operator' in value) {
         // Handle complex operators
-        switch (value.operator) {
+        const operatorValue = value as { operator: string; value: unknown };
+        switch (operatorValue.operator) {
           case 'gt':
-            filter[key] = { $gt: value.value };
+            filter[key] = { $gt: operatorValue.value };
             break;
           case 'gte':
-            filter[key] = { $gte: value.value };
+            filter[key] = { $gte: operatorValue.value };
             break;
           case 'lt':
-            filter[key] = { $lt: value.value };
+            filter[key] = { $lt: operatorValue.value };
             break;
           case 'lte':
-            filter[key] = { $lte: value.value };
+            filter[key] = { $lte: operatorValue.value };
             break;
           case 'like':
-            filter[key] = { $regex: value.value, $options: 'i' };
+            filter[key] = { $regex: operatorValue.value, $options: 'i' };
             break;
           case 'not':
-            filter[key] = { $ne: value.value };
+            filter[key] = { $ne: operatorValue.value };
             break;
           default:
-            filter[key] = value.value;
+            filter[key] = operatorValue.value;
         }
       } else {
         filter[key] = value;
@@ -529,7 +575,7 @@ export class MongooseSessionRepository extends AbstractBaseRepository<Session> i
 
     // Apply sorting
     if (options.orderBy) {
-      const sortOrder = options.order === 'desc' ? -1 : 1;
+      const sortOrder = options.orderDirection === 'DESC' ? -1 : 1;
       query.sort({ [options.orderBy]: sortOrder });
     } else {
       query.sort({ lastAccessedAt: -1 });
@@ -570,14 +616,13 @@ export class MongooseSessionRepository extends AbstractBaseRepository<Session> i
       userId: obj.userId,
       token: obj.token,
       refreshToken: obj.refreshToken,
-      deviceInfo: obj.deviceInfo,
       ipAddress: obj.ipAddress,
       userAgent: obj.userAgent,
-      isActive: obj.isActive,
+      sessionType: obj.sessionType,
       lastAccessedAt: obj.lastAccessedAt,
       expiresAt: obj.expiresAt,
-      revokedAt: obj.revokedAt,
       metadata: obj.metadata,
+      isActive: obj.isActive,
       createdAt: obj.createdAt,
       updatedAt: obj.updatedAt
     };
@@ -604,7 +649,7 @@ export class MongooseSessionRepository extends AbstractBaseRepository<Session> i
   /**
    * Validates token format
    */
-  private validateToken(token: string): boolean {
+  private validateTokenFormat(token: string): boolean {
     return typeof token === 'string' && token.length >= 32;
   }
 
@@ -625,5 +670,49 @@ export class MongooseSessionRepository extends AbstractBaseRepository<Session> i
     } finally {
       await session.endSession();
     }
+  }
+
+  /**
+   * Builds where clause for Mongoose queries
+   */
+  protected buildWhereClause(where: WhereClause): FilterQuery<SessionDocument> {
+    const filter: FilterQuery<SessionDocument> = {};
+    
+    for (const [key, value] of Object.entries(where)) {
+      if (value === null || value === undefined) {
+        filter[key] = value;
+      } else if (Array.isArray(value)) {
+        filter[key] = { $in: value };
+      } else if (typeof value === 'object' && value !== null && 'operator' in value) {
+        // Handle complex operators
+        const operatorValue = value as { operator: string; value: unknown };
+        switch (operatorValue.operator) {
+          case 'gt':
+            filter[key] = { $gt: operatorValue.value };
+            break;
+          case 'gte':
+            filter[key] = { $gte: operatorValue.value };
+            break;
+          case 'lt':
+            filter[key] = { $lt: operatorValue.value };
+            break;
+          case 'lte':
+            filter[key] = { $lte: operatorValue.value };
+            break;
+          case 'like':
+            filter[key] = { $regex: operatorValue.value, $options: 'i' };
+            break;
+          case 'not':
+            filter[key] = { $ne: operatorValue.value };
+            break;
+          default:
+            filter[key] = operatorValue.value;
+        }
+      } else {
+        filter[key] = value;
+      }
+    }
+    
+    return filter;
   }
 }
