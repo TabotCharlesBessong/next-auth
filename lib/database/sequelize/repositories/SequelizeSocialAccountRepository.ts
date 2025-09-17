@@ -124,6 +124,33 @@ export class SequelizeSocialAccountRepository extends AbstractBaseRepository<Soc
   }
 
   /**
+   * Finds social account by user ID and provider (required by SocialAccountRepository interface)
+   */
+  async findByUserIdAndProvider(userId: string, provider: string): Promise<SocialAccount | null> {
+    try {
+      if (!this.validateUUID(userId) || !this.validateProvider(provider)) {
+        return null;
+      }
+
+      const socialAccount = await this.socialAccountModel.findOne({
+        where: {
+          userId,
+          provider,
+          isActive: true
+        },
+        include: [{ 
+          association: 'user',
+          attributes: { exclude: ['password'] }
+        }],
+      });
+
+      return socialAccount ? this.mapRowToEntity(socialAccount.toJSON()) : null;
+    } catch (error) {
+      this.handleDatabaseError(error, 'find social account by user id and provider');
+    }
+  }
+
+  /**
    * Finds one social account matching criteria
    */
   async findOne(where: WhereClause, options?: QueryOptions): Promise<SocialAccount | null> {

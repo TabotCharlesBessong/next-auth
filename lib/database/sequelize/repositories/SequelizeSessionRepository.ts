@@ -39,10 +39,10 @@ export class SequelizeSessionRepository extends AbstractBaseRepository<Session> 
         createdAt: now,
         updatedAt: now,
         lastAccessedAt: now,
-      };
+      } as Session;
 
       const session = await this.sessionModel.create(sessionData);
-      return this.mapRowToEntity(session.toJSON());
+      return this.mapRowToEntity(session.toJSON() as unknown as Record<string, unknown>);
     } catch (error) {
       this.handleDatabaseError(error, 'create session');
     }
@@ -58,11 +58,11 @@ export class SequelizeSessionRepository extends AbstractBaseRepository<Session> 
       }
 
       const session = await this.sessionModel.findByPk(id, {
-        attributes: this.buildSelectFields(options),
+        attributes: this.buildSelectFields(),
         include: this.buildIncludeClause(options),
       });
 
-      return session ? this.mapRowToEntity(session.toJSON()) : null;
+      return session ? this.mapRowToEntity(session.toJSON() as unknown as Record<string, unknown>) : null;
     } catch (error) {
       this.handleDatabaseError(error, 'find session by id');
     }
@@ -89,7 +89,7 @@ export class SequelizeSessionRepository extends AbstractBaseRepository<Session> 
       if (session) {
         // Update last accessed timestamp
         await this.updateLastAccessed(session.id);
-        return this.mapRowToEntity(session.toJSON());
+        return this.mapRowToEntity(session.toJSON() as unknown as Record<string, unknown>);
       }
 
       return null;
@@ -115,16 +115,82 @@ export class SequelizeSessionRepository extends AbstractBaseRepository<Session> 
           isActive: true,
           expiresAt: { [Op.gt]: new Date() }
         },
-        attributes: this.buildSelectFields(options),
+        attributes: this.buildSelectFields(),
         include: this.buildIncludeClause(options),
         order: [['lastAccessedAt', 'DESC']],
         limit,
         offset,
       });
 
-      return sessions.map(session => this.mapRowToEntity(session.toJSON()));
+      return sessions.map(session => this.mapRowToEntity(session.toJSON() as unknown as Record<string, unknown>));
     } catch (error) {
       this.handleDatabaseError(error, 'find sessions by user id');
+    }
+  }
+
+  /**
+   * Finds active sessions for a user (required by SessionRepository interface)
+   */
+  async findActiveByUserId(userId: string): Promise<Session[]> {
+    try {
+      if (!this.validateUUID(userId)) {
+        return [];
+      }
+      
+      const sessions = await this.sessionModel.findAll({
+        where: {
+          userId,
+          isActive: true,
+          expiresAt: { [Op.gt]: new Date() }
+        },
+        order: [['lastAccessedAt', 'DESC']],
+      });
+
+      return sessions.map(session => this.mapRowToEntity(session.toJSON() as unknown as Record<string, unknown>));
+    } catch (error) {
+      this.handleDatabaseError(error, 'find active sessions by user id');
+    }
+  }
+
+  /**
+   * Invalidates all sessions for a user (required by SessionRepository interface)
+   */
+  async invalidateUserSessions(userId: string): Promise<void> {
+    try {
+      await this.sessionModel.update(
+        {
+          isActive: false,
+          updatedAt: this.getCurrentTimestamp()
+        },
+        { 
+          where: {
+            userId,
+            isActive: true
+          }
+        }
+      );
+    } catch (error) {
+      this.handleDatabaseError(error, 'invalidate user sessions');
+    }
+  }
+
+  /**
+   * Cleans up expired sessions (required by SessionRepository interface)
+   */
+  async cleanupExpiredSessions(): Promise<number> {
+    try {
+      const affectedRows = await this.sessionModel.destroy({
+        where: {
+          [Op.or]: [
+            { expiresAt: { [Op.lt]: new Date() } },
+            { isActive: false }
+          ]
+        }
+      });
+      
+      return affectedRows;
+    } catch (error) {
+      this.handleDatabaseError(error, 'cleanup expired sessions');
     }
   }
 
@@ -135,12 +201,12 @@ export class SequelizeSessionRepository extends AbstractBaseRepository<Session> 
     try {
       const session = await this.sessionModel.findOne({
         where: this.buildWhereClause(where),
-        attributes: this.buildSelectFields(options),
+        attributes: this.buildSelectFields(),
         include: this.buildIncludeClause(options),
         order: [[this.buildOrderClause(options).split(' ')[0], this.buildOrderClause(options).split(' ')[1]]],
       });
 
-      return session ? this.mapRowToEntity(session.toJSON()) : null;
+      return session ? this.mapRowToEntity(session.toJSON() as unknown as Record<string, unknown>) : null;
     } catch (error) {
       this.handleDatabaseError(error, 'find one session');
     }
@@ -155,14 +221,14 @@ export class SequelizeSessionRepository extends AbstractBaseRepository<Session> 
       
       const sessions = await this.sessionModel.findAll({
         where: where ? this.buildWhereClause(where) : undefined,
-        attributes: this.buildSelectFields(options),
+        attributes: this.buildSelectFields(),
         include: this.buildIncludeClause(options),
         order: [[this.buildOrderClause(options).split(' ')[0], this.buildOrderClause(options).split(' ')[1]]],
         limit,
         offset,
       });
 
-      return sessions.map(session => this.mapRowToEntity(session.toJSON()));
+      return sessions.map(session => this.mapRowToEntity(session.toJSON() as unknown as Record<string, unknown>));
     } catch (error) {
       this.handleDatabaseError(error, 'find many sessions');
     }
@@ -284,7 +350,6 @@ export class SequelizeSessionRepository extends AbstractBaseRepository<Session> 
     try {
       const count = await this.sessionModel.count({
         where: this.buildWhereClause(where),
-        limit: 1,
       });
       return count > 0;
     } catch (error) {
@@ -408,7 +473,7 @@ export class SequelizeSessionRepository extends AbstractBaseRepository<Session> 
         order: [['expiresAt', 'ASC']],
       });
 
-      return sessions.map(session => this.mapRowToEntity(session.toJSON()));
+      return sessions.map(session => this.mapRowToEntity(session.toJSON() as unknown as Record<string, unknown>));
     } catch (error) {
       this.handleDatabaseError(error, 'find sessions expiring soon');
     }
