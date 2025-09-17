@@ -164,7 +164,7 @@ export class MongooseConnection implements DatabaseConnection {
   /**
    * Executes a transaction (MongoDB sessions)
    */
-  async executeTransaction<T>(callback: (session: import('mongoose').ClientSession) => Promise<T>): Promise<T> {
+  async executeTransaction<T>(callback: (session: import('sequelize').Transaction | import('mongoose').ClientSession) => Promise<T>): Promise<T> {
     if (!this.connection) {
       throw new DatabaseError('No active database connection', 'CONNECTION_ERROR');
     }

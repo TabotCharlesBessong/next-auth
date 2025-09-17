@@ -200,5 +200,5 @@ export abstract class AbstractBaseRepository<T> implements BaseRepository<T> {
   /**
    * Executes a transaction
    */
-  protected abstract executeTransaction<R>(callback: (trx: unknown) => Promise<R>): Promise<R>;
+  protected abstract executeTransaction<R>(callback: (trx: import('sequelize').Transaction | import('mongoose').ClientSession) => Promise<R>): Promise<R>;
 }

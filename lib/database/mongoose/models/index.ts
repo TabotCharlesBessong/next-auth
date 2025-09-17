@@ -129,7 +129,6 @@ const UserSchema = new Schema<UserDocument>({
 });
 
 // Indexes
-UserSchema.index({ email: 1 }, { unique: true });
 UserSchema.index({ isActive: 1 });
 UserSchema.index({ createdAt: 1 });
 UserSchema.index({ lastLoginAt: 1 });
@@ -224,9 +223,7 @@ const SessionSchema = new Schema<SessionDocument>({
 });
 
 // Indexes
-SessionSchema.index({ token: 1 }, { unique: true });
 SessionSchema.index({ userId: 1 });
-SessionSchema.index({ expiresAt: 1 });
 SessionSchema.index({ isActive: 1 });
 SessionSchema.index({ lastAccessedAt: 1 });
 SessionSchema.index({ createdAt: 1 });
@@ -391,9 +388,7 @@ const PasswordResetSchema = new Schema<PasswordResetDocument>({
 });
 
 // Indexes
-PasswordResetSchema.index({ token: 1 }, { unique: true });
 PasswordResetSchema.index({ userId: 1 });
-PasswordResetSchema.index({ expiresAt: 1 });
 PasswordResetSchema.index({ isUsed: 1 });
 PasswordResetSchema.index({ createdAt: 1 });
 
@@ -459,10 +454,8 @@ const EmailVerificationSchema = new Schema<EmailVerificationDocument>({
 });
 
 // Indexes
-EmailVerificationSchema.index({ token: 1 }, { unique: true });
 EmailVerificationSchema.index({ userId: 1 });
 EmailVerificationSchema.index({ email: 1 });
-EmailVerificationSchema.index({ expiresAt: 1 });
 EmailVerificationSchema.index({ isVerified: 1 });
 EmailVerificationSchema.index({ createdAt: 1 });
 
@@ -530,7 +523,6 @@ const AuditLogSchema = new Schema<AuditLogDocument>({
 AuditLogSchema.index({ userId: 1 });
 AuditLogSchema.index({ action: 1 });
 AuditLogSchema.index({ resource: 1 });
-AuditLogSchema.index({ timestamp: 1 });
 AuditLogSchema.index({ ipAddress: 1 });
 AuditLogSchema.index({ timestamp: 1, userId: 1 });
 

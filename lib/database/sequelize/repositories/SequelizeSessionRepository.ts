@@ -514,7 +514,7 @@ export class SequelizeSessionRepository extends AbstractBaseRepository<Session> 
   /**
    * Executes a transaction
    */
-  protected async executeTransaction<R>(callback: (trx: Transaction) => Promise<R>): Promise<R> {
+  protected async executeTransaction<R>(callback: (trx: import('sequelize').Transaction | import('mongoose').ClientSession) => Promise<R>): Promise<R> {
     return await this.sessionModel.sequelize!.transaction(callback);
   }
 

@@ -609,7 +609,7 @@ export class MongooseSocialAccountRepository extends AbstractBaseRepository<Soci
   /**
    * Executes a transaction using Mongoose sessions
    */
-  protected async executeTransaction<R>(callback: (session: import('mongoose').ClientSession) => Promise<R>): Promise<R> {
+  protected async executeTransaction<R>(callback: (session: import('sequelize').Transaction | import('mongoose').ClientSession) => Promise<R>): Promise<R> {
     const session = await this.socialAccountModel.startSession();
     
     try {

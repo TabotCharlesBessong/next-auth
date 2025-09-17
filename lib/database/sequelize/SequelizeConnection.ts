@@ -102,7 +102,7 @@ export class SequelizeConnection implements DatabaseConnection {
   /**
    * Executes a database transaction
    */
-  async transaction<T>(callback: (trx: import('sequelize').Transaction) => Promise<T>): Promise<T> {
+  async transaction<T>(callback: (trx: import('sequelize').Transaction | import('mongoose').ClientSession) => Promise<T>): Promise<T> {
     if (!this.sequelize) {
       throw new DatabaseError('Database not connected', 'NOT_CONNECTED');
     }

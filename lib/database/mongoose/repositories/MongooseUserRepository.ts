@@ -499,7 +499,7 @@ export class MongooseUserRepository extends AbstractBaseRepository<User> impleme
   /**
    * Executes a transaction using Mongoose sessions
    */
-  protected async executeTransaction<R>(callback: (session: import('mongoose').ClientSession) => Promise<R>): Promise<R> {
+  protected async executeTransaction<R>(callback: (session: import('sequelize').Transaction | import('mongoose').ClientSession) => Promise<R>): Promise<R> {
     const session = await this.userModel.startSession();
     
     try {

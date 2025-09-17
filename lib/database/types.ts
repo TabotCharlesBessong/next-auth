@@ -196,7 +196,7 @@ export interface DatabaseConnection {
   disconnect(): Promise<void>;
   isConnected(): boolean;
   getConnection(): unknown;
-  transaction<T>(callback: (trx: unknown) => Promise<T>): Promise<T>;
+  transaction<T>(callback: (trx: import('sequelize').Transaction | import('mongoose').ClientSession) => Promise<T>): Promise<T>;
   migrate(): Promise<void>;
   seed(): Promise<void>;
   drop(): Promise<void>;

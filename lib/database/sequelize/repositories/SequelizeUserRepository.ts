@@ -371,7 +371,7 @@ export class SequelizeUserRepository extends AbstractBaseRepository<User> implem
   /**
    * Executes a transaction
    */
-  protected async executeTransaction<R>(callback: (trx: Transaction) => Promise<R>): Promise<R> {
+  protected async executeTransaction<R>(callback: (trx: import('sequelize').Transaction | import('mongoose').ClientSession) => Promise<R>): Promise<R> {
     return await this.userModel.sequelize!.transaction(callback);
   }
 
