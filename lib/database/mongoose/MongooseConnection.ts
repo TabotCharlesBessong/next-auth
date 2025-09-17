@@ -7,7 +7,7 @@ import { DatabaseConnection, DatabaseConfig, DatabaseError } from '../types';
 export class MongooseConnection implements DatabaseConnection {
   private connection: Connection | null = null;
   private config: DatabaseConfig;
-  private isConnected: boolean = false;
+  private connected: boolean = false;
   private connectionPromise: Promise<Connection> | null = null;
 
   constructor(config: DatabaseConfig) {
@@ -20,7 +20,7 @@ export class MongooseConnection implements DatabaseConnection {
    */
   async connect(): Promise<void> {
     try {
-      if (this.isConnected && this.connection) {
+      if (this.connected && this.connection) {
         return;
       }
 
@@ -32,7 +32,7 @@ export class MongooseConnection implements DatabaseConnection {
 
       this.connectionPromise = this.establishConnection();
       this.connection = await this.connectionPromise;
-      this.isConnected = true;
+      this.connected = true;
       this.connectionPromise = null;
 
       console.log(`✅ Connected to MongoDB: ${this.config.database}`);
@@ -109,17 +109,17 @@ export class MongooseConnection implements DatabaseConnection {
       w: 'majority',
     };
 
-    // Add SSL options if enabled
+    // Add SSL/TLS options if enabled
     if (this.config.ssl) {
-      options.ssl = true;
+      options.tls = true;
       if (this.config.sslCert) {
-        options.sslCert = this.config.sslCert;
+        options.tlsCertificateKeyFile = this.config.sslCert;
       }
       if (this.config.sslKey) {
-        options.sslKey = this.config.sslKey;
+        options.tlsCertificateKeyFile = this.config.sslKey;
       }
       if (this.config.sslCA) {
-        options.sslCA = this.config.sslCA;
+        options.tlsCAFile = this.config.sslCA;
       }
     }
 
@@ -131,10 +131,10 @@ export class MongooseConnection implements DatabaseConnection {
    */
   async disconnect(): Promise<void> {
     try {
-      if (this.connection && this.isConnected) {
+      if (this.connection && this.connected) {
         await mongoose.disconnect();
         this.connection = null;
-        this.isConnected = false;
+        this.connected = false;
         console.log('🔌 Disconnected from MongoDB');
       }
     } catch (error) {
@@ -143,19 +143,26 @@ export class MongooseConnection implements DatabaseConnection {
   }
 
   /**
-   * Checks if connected to database
+   * Checks if connection is healthy
    */
   isHealthy(): boolean {
-    return this.isConnected && 
+    return this.connected && 
            this.connection !== null && 
            this.connection.readyState === 1;
+  }
+
+  /**
+   * Alias for isHealthy to match DatabaseConnection interface
+   */
+  isConnected(): boolean {
+    return this.isHealthy();
   }
 
   /**
    * Gets the current connection
    */
   getConnection(): Connection {
-    if (!this.connection || !this.isConnected) {
+    if (!this.connection || !this.connected) {
       throw new DatabaseError('No active database connection', 'CONNECTION_ERROR');
     }
     return this.connection;
@@ -181,6 +188,33 @@ export class MongooseConnection implements DatabaseConnection {
       throw error;
     } finally {
       await session.endSession();
+    }
+  }
+
+  /**
+   * Alias for executeTransaction to match DatabaseConnection interface
+   */
+  async transaction<T>(callback: (trx: import('sequelize').Transaction | import('mongoose').ClientSession) => Promise<T>): Promise<T> {
+    return this.executeTransaction(callback);
+  }
+
+  /**
+   * Drops the database
+   */
+  async drop(): Promise<void> {
+    if (!this.connection) {
+      throw new DatabaseError('No active database connection', 'CONNECTION_ERROR');
+    }
+
+    if (!this.connection.db) {
+      throw new DatabaseError('Database connection not established', 'CONNECTION_ERROR');
+    }
+
+    try {
+      await this.connection.db.dropDatabase();
+      console.log(`🗑️ Dropped database: ${this.config.database}`);
+    } catch (error) {
+      this.handleConnectionError(error, 'drop database');
     }
   }
 
@@ -212,6 +246,9 @@ export class MongooseConnection implements DatabaseConnection {
     }
 
     const db = this.connection.db;
+    if (!db) {
+      throw new DatabaseError('Database connection not established', 'CONNECTION_ERROR');
+    }
     
     try {
       // Users collection indexes
@@ -270,6 +307,9 @@ export class MongooseConnection implements DatabaseConnection {
     }
 
     const db = this.connection.db;
+    if (!db) {
+      throw new DatabaseError('Database connection not established', 'CONNECTION_ERROR');
+    }
     
     try {
       // Create collections with validation if they don't exist
@@ -357,6 +397,16 @@ export class MongooseConnection implements DatabaseConnection {
         };
       }
 
+      if (!this.connection.db) {
+        return {
+          status: 'unhealthy',
+          details: {
+            error: 'Database connection not established',
+            connected: false
+          }
+        };
+      }
+
       // Ping the database
       await this.connection.db.admin().ping();
       
@@ -364,23 +414,23 @@ export class MongooseConnection implements DatabaseConnection {
       const stats = await this.connection.db.stats();
       
       return {
-        status: 'healthy',
-        details: {
-          connected: this.isConnected,
-          readyState: this.connection.readyState,
-          database: this.config.database,
-          host: this.config.host,
-          collections: stats.collections,
-          dataSize: stats.dataSize,
-          indexSize: stats.indexSize
-        }
-      };
+          status: 'healthy',
+          details: {
+            connected: this.connected,
+            readyState: this.connection.readyState,
+            database: this.config.database,
+            host: this.config.host,
+            collections: stats.collections,
+            dataSize: stats.dataSize,
+            indexSize: stats.indexSize
+          }
+        };
     } catch (error) {
       return {
         status: 'unhealthy',
         details: {
           error: error instanceof Error ? error.message : 'Unknown error',
-          connected: this.isConnected
+          connected: this.connected
         }
       };
     }
@@ -392,6 +442,10 @@ export class MongooseConnection implements DatabaseConnection {
   async getStats(): Promise<Record<string, unknown>> {
     if (!this.connection) {
       throw new DatabaseError('No active database connection', 'CONNECTION_ERROR');
+    }
+
+    if (!this.connection.db) {
+      throw new DatabaseError('Database connection not established', 'CONNECTION_ERROR');
     }
 
     try {
@@ -434,17 +488,17 @@ export class MongooseConnection implements DatabaseConnection {
 
     mongoose.connection.on('error', (error) => {
       console.error('❌ Mongoose connection error:', error);
-      this.isConnected = false;
+      this.connected = false;
     });
 
     mongoose.connection.on('disconnected', () => {
       console.log('🔌 Mongoose disconnected from MongoDB');
-      this.isConnected = false;
+      this.connected = false;
     });
 
     mongoose.connection.on('reconnected', () => {
       console.log('🔄 Mongoose reconnected to MongoDB');
-      this.isConnected = true;
+      this.connected = true;
     });
 
     // Graceful shutdown
@@ -462,7 +516,7 @@ export class MongooseConnection implements DatabaseConnection {
     console.error(`❌ MongoDB ${operation} error:`, message);
     
     // Reset connection state on error
-    this.isConnected = false;
+    this.connected = false;
     this.connection = null;
     this.connectionPromise = null;
     
