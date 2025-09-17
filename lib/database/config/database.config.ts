@@ -22,7 +22,13 @@ const DatabaseConfigSchema = z.object({
     idle: z.number().default(10000),
     acquire: z.number().default(60000),
     evict: z.number().default(1000)
-  }).default({})
+  }).default({
+    min: 0,
+    max: 10,
+    idle: 10000,
+    acquire: 60000,
+    evict: 1000
+  })
 });
 
 /**
@@ -110,7 +116,7 @@ export class DatabaseConfigManager {
    */
   createConfigFromEnvironment(): DatabaseConfig {
     const env = this.getValidatedEnvironment();
-    const provider = env.DATABASE_PROVIDER;
+    const provider = env.DATABASE_PROVIDER as DatabaseProvider;
 
     const baseConfig = {
       provider,
@@ -259,7 +265,7 @@ export class DatabaseConfigManager {
       configs.read = {
         ...configs.primary,
         host: this.envConfig.DATABASE_READ_HOST,
-        port: this.parseNumber(this.envConfig.DATABASE_READ_PORT, configs.primary.port),
+        port: this.parseNumber(this.envConfig.DATABASE_READ_PORT, configs.primary.port || 5432),
         username: this.envConfig.DATABASE_READ_USERNAME || configs.primary.username,
         password: this.envConfig.DATABASE_READ_PASSWORD || configs.primary.password
       };

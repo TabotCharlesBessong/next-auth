@@ -191,20 +191,20 @@ repositoryImplementations.forEach(({ name, createRepository }) => {
       });
     });
 
-    describe('findByUsername', () => {
-      it('should find user by username', async () => {
-        jest.spyOn(repository, 'findByUsername').mockResolvedValue(mockUser);
+    describe('find by username functionality', () => {
+      it('should find user by username using findOne method', async () => {
+        jest.spyOn(repository, 'findOne').mockResolvedValue(mockUser);
         
-        const result = await repository.findByUsername('testuser');
+        const result = await repository.findOne({ username: 'testuser' });
         
         expect(result).toEqual(mockUser);
-        expect(repository.findByUsername).toHaveBeenCalledWith('testuser');
+        expect(repository.findOne).toHaveBeenCalledWith({ username: 'testuser' });
       });
 
       it('should return null for non-existent username', async () => {
-        jest.spyOn(repository, 'findByUsername').mockResolvedValue(null);
+        jest.spyOn(repository, 'findOne').mockResolvedValue(null);
         
-        const result = await repository.findByUsername('nonexistent');
+        const result = await repository.findOne({ username: 'nonexistent' });
         
         expect(result).toBeNull();
       });
@@ -412,50 +412,49 @@ repositoryImplementations.forEach(({ name, createRepository }) => {
       });
     });
 
-    describe('verifyEmail', () => {
-      it('should verify user email', async () => {
+    describe('verify email functionality', () => {
+      it('should verify user email using update method', async () => {
         const verifiedUser = {
           ...mockUser,
-          emailVerified: true,
-          emailVerifiedAt: new Date()
+          emailVerified: true
         };
         
-        jest.spyOn(repository, 'verifyEmail').mockResolvedValue(verifiedUser);
+        jest.spyOn(repository, 'update').mockResolvedValue(verifiedUser);
         
-        const result = await repository.verifyEmail('1');
+        const result = await repository.update('1', { emailVerified: true });
         
         expect(result).toEqual(verifiedUser);
-        expect(repository.verifyEmail).toHaveBeenCalledWith('1');
+        expect(repository.update).toHaveBeenCalledWith('1', { emailVerified: true });
       });
 
-      it('should return null for non-existent user', async () => {
-        jest.spyOn(repository, 'verifyEmail').mockResolvedValue(null);
+      it('should return null for non-existent user when verifying email', async () => {
+        jest.spyOn(repository, 'update').mockResolvedValue(null);
         
-        const result = await repository.verifyEmail('999');
+        const result = await repository.update('999', { emailVerified: true });
         
         expect(result).toBeNull();
       });
     });
 
-    describe('deactivateUser', () => {
-      it('should deactivate user', async () => {
+    describe('deactivate user functionality', () => {
+      it('should deactivate user using update method', async () => {
         const deactivatedUser = {
           ...mockUser,
           isActive: false
         };
         
-        jest.spyOn(repository, 'deactivateUser').mockResolvedValue(deactivatedUser);
+        jest.spyOn(repository, 'update').mockResolvedValue(deactivatedUser);
         
-        const result = await repository.deactivateUser('1');
+        const result = await repository.update('1', { isActive: false });
         
         expect(result).toEqual(deactivatedUser);
-        expect(repository.deactivateUser).toHaveBeenCalledWith('1');
+        expect(repository.update).toHaveBeenCalledWith('1', { isActive: false });
       });
 
-      it('should return null for non-existent user', async () => {
-        jest.spyOn(repository, 'deactivateUser').mockResolvedValue(null);
+      it('should return null for non-existent user when updating', async () => {
+        jest.spyOn(repository, 'update').mockResolvedValue(null);
         
-        const result = await repository.deactivateUser('999');
+        const result = await repository.update('999', { isActive: false });
         
         expect(result).toBeNull();
       });
