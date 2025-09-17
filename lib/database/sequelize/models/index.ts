@@ -32,6 +32,9 @@ export class SessionModel extends Model<Session> implements Session {
   public expiresAt!: Date;
   public ipAddress?: string;
   public userAgent?: string;
+  public sessionType?: 'web' | 'mobile' | 'api';
+  public lastAccessedAt?: Date;
+  public metadata?: Record<string, unknown>;
   public isActive!: boolean;
   public createdAt!: Date;
   public updatedAt!: Date;
@@ -49,6 +52,11 @@ export class SocialAccountModel extends Model<SocialAccount> implements SocialAc
   public accessToken?: string;
   public refreshToken?: string;
   public expiresAt?: Date;
+  public tokenExpiresAt?: Date;
+  public scope?: string[];
+  public isActive!: boolean;
+  public lastSyncAt?: Date;
+  public metadata?: Record<string, unknown>;
   public createdAt!: Date;
   public updatedAt!: Date;
 }
@@ -67,9 +75,15 @@ export class PasswordResetModel extends Model<PasswordReset> implements Password
 export class EmailVerificationModel extends Model<EmailVerification> implements EmailVerification {
   public id!: string;
   public userId!: string;
+  public email!: string;
   public token!: string;
   public expiresAt!: Date;
   public isUsed!: boolean;
+  public isVerified!: boolean;
+  public verifiedAt?: Date;
+  public attempts!: number;
+  public ipAddress?: string;
+  public userAgent?: string;
   public createdAt!: Date;
 }
 
@@ -218,9 +232,30 @@ export function initializeModels(sequelize: Sequelize): {
         type: DataTypes.TEXT,
         allowNull: true,
       },
+      sessionType: {
+        type: DataTypes.ENUM('web', 'mobile', 'api'),
+        allowNull: true,
+      },
+      lastAccessedAt: {
+        type: DataTypes.DATE,
+        allowNull: true,
+      },
+      metadata: {
+        type: DataTypes.JSON,
+        allowNull: true,
+      },
+      createdAt: {
+        type: DataTypes.DATE,
+        allowNull: false,
+        defaultValue: DataTypes.NOW,
+      },
       isActive: {
         type: DataTypes.BOOLEAN,
         defaultValue: true,
+        allowNull: false,
+      },
+      updatedAt: {
+        type: DataTypes.DATE,
         allowNull: false,
       },
     },
@@ -296,6 +331,35 @@ export function initializeModels(sequelize: Sequelize): {
         type: DataTypes.DATE,
         allowNull: true,
       },
+      tokenExpiresAt: {
+        type: DataTypes.DATE,
+        allowNull: true,
+      },
+      scope: {
+        type: DataTypes.JSON,
+        allowNull: true,
+      },
+      isActive: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: true,
+        allowNull: false,
+      },
+      lastSyncAt: {
+        type: DataTypes.DATE,
+        allowNull: true,
+      },
+      metadata: {
+        type: DataTypes.JSON,
+        allowNull: true,
+      },
+      createdAt: {
+        type: DataTypes.DATE,
+        allowNull: false,
+      },
+      updatedAt: {
+        type: DataTypes.DATE,
+        allowNull: false,
+      },
     },
     {
       sequelize,
@@ -348,6 +412,10 @@ export function initializeModels(sequelize: Sequelize): {
         defaultValue: false,
         allowNull: false,
       },
+      createdAt: {
+        type: DataTypes.DATE,
+        allowNull: false,
+      },
     },
     {
       sequelize,
@@ -390,6 +458,10 @@ export function initializeModels(sequelize: Sequelize): {
         },
         onDelete: 'CASCADE',
       },
+      email: {
+        type: DataTypes.STRING,
+        allowNull: false,
+      },
       token: {
         type: DataTypes.STRING,
         allowNull: false,
@@ -403,6 +475,33 @@ export function initializeModels(sequelize: Sequelize): {
         type: DataTypes.BOOLEAN,
         defaultValue: false,
         allowNull: false,
+      },
+      isVerified: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false,
+        allowNull: false,
+      },
+      verifiedAt: {
+        type: DataTypes.DATE,
+        allowNull: true,
+      },
+      attempts: {
+        type: DataTypes.INTEGER,
+        defaultValue: 0,
+        allowNull: false,
+      },
+      ipAddress: {
+        type: DataTypes.STRING,
+        allowNull: true,
+      },
+      userAgent: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+      },
+      createdAt: {
+        type: DataTypes.DATE,
+        allowNull: false,
+        defaultValue: DataTypes.NOW,
       },
     },
     {
@@ -469,6 +568,11 @@ export function initializeModels(sequelize: Sequelize): {
       metadata: {
         type: DataTypes.JSON,
         allowNull: true,
+      },
+      createdAt: {
+        type: DataTypes.DATE,
+        allowNull: false,
+        defaultValue: DataTypes.NOW,
       },
     },
     {

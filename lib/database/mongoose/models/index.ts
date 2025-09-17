@@ -2,27 +2,27 @@ import mongoose, { Schema, Document, Model } from 'mongoose';
 import { User, Session, SocialAccount, PasswordReset, EmailVerification, AuditLog } from '../../types';
 
 // Extend interfaces with Mongoose Document
-export interface UserDocument extends User, Document {
+export interface UserDocument extends Omit<User, 'id'>, Document {
   _id: string;
 }
 
-export interface SessionDocument extends Session, Document {
+export interface SessionDocument extends Omit<Session, 'id'>, Document {
   _id: string;
 }
 
-export interface SocialAccountDocument extends SocialAccount, Document {
+export interface SocialAccountDocument extends Omit<SocialAccount, 'id'>, Document {
   _id: string;
 }
 
-export interface PasswordResetDocument extends PasswordReset, Document {
+export interface PasswordResetDocument extends Omit<PasswordReset, 'id'>, Document {
   _id: string;
 }
 
-export interface EmailVerificationDocument extends EmailVerification, Document {
+export interface EmailVerificationDocument extends Omit<EmailVerification, 'id'>, Document {
   _id: string;
 }
 
-export interface AuditLogDocument extends AuditLog, Document {
+export interface AuditLogDocument extends Omit<AuditLog, 'id'>, Document {
   _id: string;
 }
 
@@ -121,8 +121,8 @@ const UserSchema = new Schema<UserDocument>({
   collection: 'users',
   toJSON: {
     transform: function(doc, ret) {
-      delete ret.password;
-      delete ret.__v;
+      delete (ret as Record<string, unknown>)['password'];
+      delete (ret as Record<string, unknown>)['__v'];
       return ret;
     }
   }
@@ -175,7 +175,7 @@ const SessionSchema = new Schema<SessionDocument>({
     unique: true,
     minlength: 32
   },
-  type: {
+  sessionType: {
     type: String,
     enum: ['web', 'mobile', 'api'],
     default: 'web'
@@ -319,9 +319,9 @@ const SocialAccountSchema = new Schema<SocialAccountDocument>({
   collection: 'socialaccounts',
   toJSON: {
     transform: function(doc, ret) {
-      delete ret.accessToken;
-      delete ret.refreshToken;
-      delete ret.__v;
+      delete (ret as Record<string, unknown>)['accessToken'];
+      delete (ret as Record<string, unknown>)['refreshToken'];
+      delete (ret as Record<string, unknown>)['__v'];
       return ret;
     }
   }
@@ -554,6 +554,10 @@ export const initializeMongooseModels = () => {
 
 // Helper function to drop all collections (for testing)
 export const dropAllCollections = async () => {
+  if (!mongoose.connection.db) {
+    throw new Error('Database connection not established');
+  }
+  
   const collections = await mongoose.connection.db.listCollections().toArray();
   
   for (const collection of collections) {
