@@ -17,6 +17,9 @@ export interface DatabaseConfig {
   schema?: string;
   authSource?: string;
   ssl?: boolean;
+  sslCert?: string;
+  sslKey?: string;
+  sslCA?: string;
   logging?: boolean;
   pool?: {
     min?: number;
@@ -56,6 +59,9 @@ export interface Session {
   expiresAt: Date;
   ipAddress?: string;
   userAgent?: string;
+  sessionType?: 'web' | 'mobile' | 'api';
+  lastAccessedAt?: Date;
+  metadata?: Record<string, unknown>;
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -72,6 +78,11 @@ export interface SocialAccount {
   accessToken?: string;
   refreshToken?: string;
   expiresAt?: Date;
+  tokenExpiresAt?: Date;
+  scope?: string[];
+  isActive: boolean;
+  lastSyncAt?: Date;
+  metadata?: Record<string, unknown>;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -82,15 +93,24 @@ export interface PasswordReset {
   token: string;
   expiresAt: Date;
   isUsed: boolean;
+  usedAt?: Date;
+  ipAddress?: string;
+  userAgent?: string;
   createdAt: Date;
 }
 
 export interface EmailVerification {
   id: string;
   userId: string;
+  email: string;
   token: string;
   expiresAt: Date;
   isUsed: boolean;
+  isVerified: boolean;
+  verifiedAt?: Date;
+  attempts: number;
+  ipAddress?: string;
+  userAgent?: string;
   createdAt: Date;
 }
 
@@ -103,6 +123,8 @@ export interface AuditLog {
   ipAddress?: string;
   userAgent?: string;
   metadata?: Record<string, unknown>;
+  details?: Record<string, unknown>;
+  timestamp?: Date;
   createdAt: Date;
 }
 
@@ -113,6 +135,7 @@ export interface QueryOptions {
   orderBy?: string;
   orderDirection?: 'ASC' | 'DESC';
   include?: string[];
+  select?: string[];
 }
 
 export interface WhereClause {

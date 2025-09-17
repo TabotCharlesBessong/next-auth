@@ -289,7 +289,7 @@ export class DatabaseFactory {
     // For now, this is a simplified implementation
     // In a real implementation, this would use the actual transaction API of the database
     try {
-      const result = await callback(null); // Mock transaction object
+      const result = await callback(null as unknown as import('sequelize').Transaction | import('mongoose').ClientSession); // Mock transaction object
       return result;
     } catch (error) {
       // In a real implementation, this would rollback the transaction
@@ -367,7 +367,7 @@ export class DatabaseFactory {
       if (!connection) {
         return false;
       }
-      return await connection.healthCheck();
+      return connection.isConnected();
     } catch {
       return false;
     }
@@ -379,7 +379,7 @@ export class DatabaseFactory {
   async getAllHealthStatus(): Promise<Record<string, boolean>> {
     const healthPromises = Array.from(this.connections.entries()).map(async ([key, connection]) => {
       try {
-        const isHealthy = await connection.healthCheck();
+        const isHealthy = connection.isConnected();
         return [key, isHealthy] as [string, boolean];
       } catch {
         return [key, false] as [string, boolean];
