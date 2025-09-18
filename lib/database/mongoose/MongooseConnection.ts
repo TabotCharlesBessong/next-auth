@@ -512,8 +512,8 @@ export class MongooseConnection implements DatabaseConnection {
    * Handles connection errors
    */
   private handleConnectionError(error: unknown, operation: string): never {
-    const message = error instanceof Error ? error.message : 'Unknown database error';
-    console.error(`❌ MongoDB ${operation} error:`, message);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`❌ MongoDB ${operation} error:`, errorMessage);
     
     // Reset connection state on error
     this.connected = false;
@@ -521,7 +521,7 @@ export class MongooseConnection implements DatabaseConnection {
     this.connectionPromise = null;
     
     throw new DatabaseError(
-      `MongoDB ${operation} failed: ${message}`,
+      `MongoDB ${operation} failed: ${errorMessage}`,
       'CONNECTION_ERROR',
       error
     );

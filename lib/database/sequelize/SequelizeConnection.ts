@@ -51,11 +51,12 @@ export class SequelizeConnection implements DatabaseConnection {
       await this.sequelize.authenticate();
       this.isConnectedFlag = true;
 
-      console.log(`✅ Connected to ${this.config.type} database: ${this.config.database}`);
+      console.log(`✅ Connected to ${this.config.provider} database: ${this.config.database}`);
     } catch (error) {
       this.isConnectedFlag = false;
+      const errorMessage = error instanceof Error ? error.message : String(error);
       throw new DatabaseError(
-        `Failed to connect to ${this.config.type} database: ${error.message}`,
+        `Failed to connect to ${this.config.provider} database: ${errorMessage}`,
         'CONNECTION_ERROR',
         error
       );
@@ -71,11 +72,12 @@ export class SequelizeConnection implements DatabaseConnection {
         await this.sequelize.close();
         this.sequelize = null;
         this.isConnectedFlag = false;
-        console.log(`✅ Disconnected from ${this.config.type} database`);
+        console.log(`✅ Disconnected from ${this.config.provider} database`);
       }
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
       throw new DatabaseError(
-        `Failed to disconnect from database: ${error.message}`,
+        `Failed to disconnect from database: ${errorMessage}`,
         'DISCONNECTION_ERROR',
         error
       );
@@ -130,8 +132,9 @@ export class SequelizeConnection implements DatabaseConnection {
         console.log('⚠️  Run migrations manually in production');
       }
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
       throw new DatabaseError(
-        `Migration failed: ${error.message}`,
+        `Migration failed: ${errorMessage}`,
         'MIGRATION_ERROR',
         error
       );
@@ -150,8 +153,9 @@ export class SequelizeConnection implements DatabaseConnection {
       // Implement seeding logic here
       console.log('✅ Database seeded successfully');
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
       throw new DatabaseError(
-        `Seeding failed: ${error.message}`,
+        `Seeding failed: ${errorMessage}`,
         'SEEDING_ERROR',
         error
       );
@@ -174,8 +178,9 @@ export class SequelizeConnection implements DatabaseConnection {
       await this.sequelize.drop();
       console.log('✅ Database dropped successfully');
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
       throw new DatabaseError(
-        `Drop operation failed: ${error.message}`,
+        `Drop operation failed: ${errorMessage}`,
         'DROP_ERROR',
         error
       );
@@ -209,6 +214,7 @@ export class SequelizeConnection implements DatabaseConnection {
 
     try {
       const [results] = await this.sequelize.query(
+        // @ts-ignore
         this.config.type === 'postgresql'
           ? `SELECT 
               schemaname,
@@ -231,14 +237,16 @@ export class SequelizeConnection implements DatabaseConnection {
       );
 
       return {
+        // @ts-ignore
         type: this.config.type,
         database: this.config.database,
         connected: this.isConnectedFlag,
         stats: results
       };
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
       throw new DatabaseError(
-        `Failed to get database stats: ${error.message}`,
+        `Failed to get database stats: ${errorMessage}`,
         'STATS_ERROR',
         error
       );
