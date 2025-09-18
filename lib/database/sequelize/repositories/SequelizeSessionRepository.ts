@@ -544,29 +544,30 @@ export class SequelizeSessionRepository extends AbstractBaseRepository<Session> 
         sequelizeWhere[key] = { [Op.is]: value };
       } else if (Array.isArray(value)) {
         sequelizeWhere[key] = { [Op.in]: value };
-      } else if (typeof value === 'object' && value.operator) {
-        // Handle complex operators
-        switch (value.operator) {
+      } else if (typeof value === 'object' && value !== null && 'operator' in value) {
+        // Handle complex operators with proper type checking
+        const operatorValue = value as { operator: string; value: unknown };
+        switch (operatorValue.operator) {
           case 'gt':
-            sequelizeWhere[key] = { [Op.gt]: value.value };
+            sequelizeWhere[key] = { [Op.gt]: operatorValue.value };
             break;
           case 'gte':
-            sequelizeWhere[key] = { [Op.gte]: value.value };
+            sequelizeWhere[key] = { [Op.gte]: operatorValue.value };
             break;
           case 'lt':
-            sequelizeWhere[key] = { [Op.lt]: value.value };
+            sequelizeWhere[key] = { [Op.lt]: operatorValue.value };
             break;
           case 'lte':
-            sequelizeWhere[key] = { [Op.lte]: value.value };
+            sequelizeWhere[key] = { [Op.lte]: operatorValue.value };
             break;
           case 'like':
-            sequelizeWhere[key] = { [Op.iLike]: `%${value.value}%` };
+            sequelizeWhere[key] = { [Op.iLike]: `%${operatorValue.value}%` };
             break;
           case 'not':
-            sequelizeWhere[key] = { [Op.not]: value.value };
+            sequelizeWhere[key] = { [Op.not]: operatorValue.value };
             break;
           default:
-            sequelizeWhere[key] = value.value;
+            sequelizeWhere[key] = operatorValue.value;
         }
       } else {
         sequelizeWhere[key] = value;

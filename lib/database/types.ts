@@ -138,6 +138,45 @@ export interface QueryOptions {
   select?: string[];
 }
 
+// User-specific types
+export interface CreateUserData {
+  email: string;
+  password?: string;
+  firstName?: string;
+  lastName?: string;
+  fullName?: string;
+  avatar?: string;
+  bio?: string;
+  phone?: string;
+  dateOfBirth?: Date;
+  isEmailVerified?: boolean;
+  isActive?: boolean;
+  username?: string;
+  passwordHash?: string;
+  [key: string]: unknown;
+}
+
+export interface UpdateUserData {
+  email?: string;
+  password?: string;
+  firstName?: string;
+  lastName?: string;
+  fullName?: string;
+  avatar?: string;
+  bio?: string;
+  phone?: string;
+  dateOfBirth?: Date;
+  isEmailVerified?: boolean;
+  isActive?: boolean;
+  lastLoginAt?: Date;
+  [key: string]: unknown;
+}
+
+export interface FindUserOptions extends QueryOptions {
+  includePassword?: boolean;
+  includeInactive?: boolean;
+}
+
 export interface WhereClause {
   [key: string]: unknown;
 }
@@ -223,6 +262,8 @@ export interface DatabaseConnection {
   migrate(): Promise<void>;
   seed(): Promise<void>;
   drop(): Promise<void>;
+  healthCheck(): Promise<boolean>;
+  getStats(): Promise<Record<string, unknown>>;
 }
 
 // Database service interface
