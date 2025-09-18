@@ -382,57 +382,22 @@ export class MongooseConnection implements DatabaseConnection {
   /**
    * Performs health check
    */
-  async healthCheck(): Promise<{
-    status: 'healthy' | 'unhealthy';
-    details: Record<string, unknown>;
-  }> {
+  async healthCheck(): Promise<boolean> {
     try {
       if (!this.connection) {
-        return {
-          status: 'unhealthy',
-          details: {
-            error: 'No database connection',
-            connected: false
-          }
-        };
+        return false;
       }
 
       if (!this.connection.db) {
-        return {
-          status: 'unhealthy',
-          details: {
-            error: 'Database connection not established',
-            connected: false
-          }
-        };
+        return false;
       }
 
       // Ping the database
       await this.connection.db.admin().ping();
       
-      // Get connection stats
-      const stats = await this.connection.db.stats();
-      
-      return {
-          status: 'healthy',
-          details: {
-            connected: this.connected,
-            readyState: this.connection.readyState,
-            database: this.config.database,
-            host: this.config.host,
-            collections: stats.collections,
-            dataSize: stats.dataSize,
-            indexSize: stats.indexSize
-          }
-        };
+      return true;
     } catch (error) {
-      return {
-        status: 'unhealthy',
-        details: {
-          error: error instanceof Error ? error.message : 'Unknown error',
-          connected: this.connected
-        }
-      };
+      return false;
     }
   }
 
