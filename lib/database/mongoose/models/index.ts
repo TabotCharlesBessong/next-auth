@@ -2,27 +2,27 @@ import mongoose, { Schema, Document, Model } from 'mongoose';
 import { User, Session, SocialAccount, PasswordReset, EmailVerification, AuditLog } from '../../types';
 
 // Extend interfaces with Mongoose Document
-export interface UserDocument extends User, Document {
+export interface UserDocument extends Omit<User, 'id'>, Document {
   _id: string;
 }
 
-export interface SessionDocument extends Session, Document {
+export interface SessionDocument extends Omit<Session, 'id'>, Document {
   _id: string;
 }
 
-export interface SocialAccountDocument extends SocialAccount, Document {
+export interface SocialAccountDocument extends Omit<SocialAccount, 'id'>, Document {
   _id: string;
 }
 
-export interface PasswordResetDocument extends PasswordReset, Document {
+export interface PasswordResetDocument extends Omit<PasswordReset, 'id'>, Document {
   _id: string;
 }
 
-export interface EmailVerificationDocument extends EmailVerification, Document {
+export interface EmailVerificationDocument extends Omit<EmailVerification, 'id'>, Document {
   _id: string;
 }
 
-export interface AuditLogDocument extends AuditLog, Document {
+export interface AuditLogDocument extends Omit<AuditLog, 'id'>, Document {
   _id: string;
 }
 
@@ -121,15 +121,14 @@ const UserSchema = new Schema<UserDocument>({
   collection: 'users',
   toJSON: {
     transform: function(doc, ret) {
-      delete ret.password;
-      delete ret.__v;
+      delete (ret as Record<string, unknown>)['password'];
+      delete (ret as Record<string, unknown>)['__v'];
       return ret;
     }
   }
 });
 
 // Indexes
-UserSchema.index({ email: 1 }, { unique: true });
 UserSchema.index({ isActive: 1 });
 UserSchema.index({ createdAt: 1 });
 UserSchema.index({ lastLoginAt: 1 });
@@ -176,7 +175,7 @@ const SessionSchema = new Schema<SessionDocument>({
     unique: true,
     minlength: 32
   },
-  type: {
+  sessionType: {
     type: String,
     enum: ['web', 'mobile', 'api'],
     default: 'web'
@@ -224,9 +223,7 @@ const SessionSchema = new Schema<SessionDocument>({
 });
 
 // Indexes
-SessionSchema.index({ token: 1 }, { unique: true });
 SessionSchema.index({ userId: 1 });
-SessionSchema.index({ expiresAt: 1 });
 SessionSchema.index({ isActive: 1 });
 SessionSchema.index({ lastAccessedAt: 1 });
 SessionSchema.index({ createdAt: 1 });
@@ -322,9 +319,9 @@ const SocialAccountSchema = new Schema<SocialAccountDocument>({
   collection: 'socialaccounts',
   toJSON: {
     transform: function(doc, ret) {
-      delete ret.accessToken;
-      delete ret.refreshToken;
-      delete ret.__v;
+      delete (ret as Record<string, unknown>)['accessToken'];
+      delete (ret as Record<string, unknown>)['refreshToken'];
+      delete (ret as Record<string, unknown>)['__v'];
       return ret;
     }
   }
@@ -391,9 +388,7 @@ const PasswordResetSchema = new Schema<PasswordResetDocument>({
 });
 
 // Indexes
-PasswordResetSchema.index({ token: 1 }, { unique: true });
 PasswordResetSchema.index({ userId: 1 });
-PasswordResetSchema.index({ expiresAt: 1 });
 PasswordResetSchema.index({ isUsed: 1 });
 PasswordResetSchema.index({ createdAt: 1 });
 
@@ -459,10 +454,8 @@ const EmailVerificationSchema = new Schema<EmailVerificationDocument>({
 });
 
 // Indexes
-EmailVerificationSchema.index({ token: 1 }, { unique: true });
 EmailVerificationSchema.index({ userId: 1 });
 EmailVerificationSchema.index({ email: 1 });
-EmailVerificationSchema.index({ expiresAt: 1 });
 EmailVerificationSchema.index({ isVerified: 1 });
 EmailVerificationSchema.index({ createdAt: 1 });
 
@@ -530,7 +523,6 @@ const AuditLogSchema = new Schema<AuditLogDocument>({
 AuditLogSchema.index({ userId: 1 });
 AuditLogSchema.index({ action: 1 });
 AuditLogSchema.index({ resource: 1 });
-AuditLogSchema.index({ timestamp: 1 });
 AuditLogSchema.index({ ipAddress: 1 });
 AuditLogSchema.index({ timestamp: 1, userId: 1 });
 
@@ -562,6 +554,10 @@ export const initializeMongooseModels = () => {
 
 // Helper function to drop all collections (for testing)
 export const dropAllCollections = async () => {
+  if (!mongoose.connection.db) {
+    throw new Error('Database connection not established');
+  }
+  
   const collections = await mongoose.connection.db.listCollections().toArray();
   
   for (const collection of collections) {

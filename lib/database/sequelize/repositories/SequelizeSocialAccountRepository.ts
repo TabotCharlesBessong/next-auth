@@ -40,8 +40,8 @@ export class SequelizeSocialAccountRepository extends AbstractBaseRepository<Soc
         updatedAt: now,
       };
 
-      const socialAccount = await this.socialAccountModel.create(socialAccountData);
-      return this.mapRowToEntity(socialAccount.toJSON());
+      const socialAccount = await this.socialAccountModel.create(socialAccountData as any);
+      return this.mapRowToEntity(socialAccount.toJSON() as unknown as Record<string, unknown>);
     } catch (error) {
       this.handleDatabaseError(error, 'create social account');
     }
@@ -57,11 +57,11 @@ export class SequelizeSocialAccountRepository extends AbstractBaseRepository<Soc
       }
 
       const socialAccount = await this.socialAccountModel.findByPk(id, {
-        attributes: this.buildSelectFields(options),
+        attributes: this.buildSelectFields(),
         include: this.buildIncludeClause(options),
       });
 
-      return socialAccount ? this.mapRowToEntity(socialAccount.toJSON()) : null;
+      return socialAccount ? this.mapRowToEntity(socialAccount.toJSON() as unknown as Record<string, unknown>) : null;
     } catch (error) {
       this.handleDatabaseError(error, 'find social account by id');
     }
@@ -88,7 +88,7 @@ export class SequelizeSocialAccountRepository extends AbstractBaseRepository<Soc
         }],
       });
 
-      return socialAccount ? this.mapRowToEntity(socialAccount.toJSON()) : null;
+      return socialAccount ? this.mapRowToEntity(socialAccount.toJSON() as unknown as Record<string, unknown>) : null;
     } catch (error) {
       this.handleDatabaseError(error, 'find social account by provider');
     }
@@ -110,16 +110,43 @@ export class SequelizeSocialAccountRepository extends AbstractBaseRepository<Soc
           userId,
           isActive: true
         },
-        attributes: this.buildSelectFields(options),
+        attributes: this.buildSelectFields(),
         include: this.buildIncludeClause(options),
         order: [['createdAt', 'DESC']],
         limit,
         offset,
       });
 
-      return socialAccounts.map(account => this.mapRowToEntity(account.toJSON()));
+      return socialAccounts.map(account => this.mapRowToEntity(account.toJSON() as unknown as Record<string, unknown>));
     } catch (error) {
       this.handleDatabaseError(error, 'find social accounts by user id');
+    }
+  }
+
+  /**
+   * Finds social account by user ID and provider (required by SocialAccountRepository interface)
+   */
+  async findByUserIdAndProvider(userId: string, provider: string): Promise<SocialAccount | null> {
+    try {
+      if (!this.validateUUID(userId) || !this.validateProvider(provider)) {
+        return null;
+      }
+
+      const socialAccount = await this.socialAccountModel.findOne({
+        where: {
+          userId,
+          provider,
+          isActive: true
+        },
+        include: [{ 
+          association: 'user',
+          attributes: { exclude: ['password'] }
+        }],
+      });
+
+      return socialAccount ? this.mapRowToEntity(socialAccount.toJSON() as unknown as Record<string, unknown>) : null;
+    } catch (error) {
+      this.handleDatabaseError(error, 'find social account by user id and provider');
     }
   }
 
@@ -130,12 +157,12 @@ export class SequelizeSocialAccountRepository extends AbstractBaseRepository<Soc
     try {
       const socialAccount = await this.socialAccountModel.findOne({
         where: this.buildWhereClause(where),
-        attributes: this.buildSelectFields(options),
+        attributes: this.buildSelectFields(),
         include: this.buildIncludeClause(options),
         order: [[this.buildOrderClause(options).split(' ')[0], this.buildOrderClause(options).split(' ')[1]]],
       });
 
-      return socialAccount ? this.mapRowToEntity(socialAccount.toJSON()) : null;
+      return socialAccount ? this.mapRowToEntity(socialAccount.toJSON() as unknown as Record<string, unknown>) : null;
     } catch (error) {
       this.handleDatabaseError(error, 'find one social account');
     }
@@ -150,14 +177,14 @@ export class SequelizeSocialAccountRepository extends AbstractBaseRepository<Soc
       
       const socialAccounts = await this.socialAccountModel.findAll({
         where: where ? this.buildWhereClause(where) : undefined,
-        attributes: this.buildSelectFields(options),
+        attributes: this.buildSelectFields(),
         include: this.buildIncludeClause(options),
         order: [[this.buildOrderClause(options).split(' ')[0], this.buildOrderClause(options).split(' ')[1]]],
         limit,
         offset,
       });
 
-      return socialAccounts.map(account => this.mapRowToEntity(account.toJSON()));
+      return socialAccounts.map(account => this.mapRowToEntity(account.toJSON() as unknown as Record<string, unknown>));
     } catch (error) {
       this.handleDatabaseError(error, 'find many social accounts');
     }
@@ -284,7 +311,6 @@ export class SequelizeSocialAccountRepository extends AbstractBaseRepository<Soc
     try {
       const count = await this.socialAccountModel.count({
         where: this.buildWhereClause(where),
-        limit: 1,
       });
       return count > 0;
     } catch (error) {
@@ -337,7 +363,7 @@ export class SequelizeSocialAccountRepository extends AbstractBaseRepository<Soc
         return false;
       }
 
-      return await this.delete(socialAccount.id, { soft: true });
+      return await this.delete(socialAccount.id, { where: { id: socialAccount.id }, soft: true });
     } catch (error) {
       this.handleDatabaseError(error, 'unlink social account from user');
     }
@@ -383,14 +409,14 @@ export class SequelizeSocialAccountRepository extends AbstractBaseRepository<Soc
           provider,
           isActive: true
         },
-        attributes: this.buildSelectFields(options),
+        attributes: this.buildSelectFields(),
         include: this.buildIncludeClause(options),
         order: [['createdAt', 'DESC']],
         limit,
         offset,
       });
 
-      return socialAccounts.map(account => this.mapRowToEntity(account.toJSON()));
+      return socialAccounts.map(account => this.mapRowToEntity(account.toJSON() as unknown as Record<string, unknown>));
     } catch (error) {
       this.handleDatabaseError(error, 'find social accounts by provider type');
     }
@@ -408,7 +434,7 @@ export class SequelizeSocialAccountRepository extends AbstractBaseRepository<Soc
             [Op.lt]: new Date()
           },
           refreshToken: {
-            [Op.not]: null
+            [Op.ne]: null as any
           }
         },
         include: [{ 
@@ -418,7 +444,7 @@ export class SequelizeSocialAccountRepository extends AbstractBaseRepository<Soc
         order: [['tokenExpiresAt', 'ASC']],
       });
 
-      return socialAccounts.map(account => this.mapRowToEntity(account.toJSON()));
+      return socialAccounts.map(account => this.mapRowToEntity(account.toJSON() as unknown as Record<string, unknown>));
     } catch (error) {
       this.handleDatabaseError(error, 'find expired tokens');
     }
@@ -442,7 +468,7 @@ export class SequelizeSocialAccountRepository extends AbstractBaseRepository<Soc
       });
 
       const stats: Record<string, number> = {};
-      results.forEach((result: { provider: string; count: string }) => {
+      (results as any[]).forEach((result: { provider: string; count: string }) => {
         stats[result.provider] = parseInt(result.count, 10);
       });
 
@@ -471,29 +497,30 @@ export class SequelizeSocialAccountRepository extends AbstractBaseRepository<Soc
         sequelizeWhere[key] = { [Op.is]: value };
       } else if (Array.isArray(value)) {
         sequelizeWhere[key] = { [Op.in]: value };
-      } else if (typeof value === 'object' && value.operator) {
-        // Handle complex operators
-        switch (value.operator) {
+      } else if (typeof value === 'object' && value !== null && 'operator' in value && 'value' in value) {
+        // Handle complex operators with proper type checking
+        const operatorValue = value as { operator: string; value: unknown };
+        switch (operatorValue.operator) {
           case 'gt':
-            sequelizeWhere[key] = { [Op.gt]: value.value };
+            sequelizeWhere[key] = { [Op.gt]: operatorValue.value };
             break;
           case 'gte':
-            sequelizeWhere[key] = { [Op.gte]: value.value };
+            sequelizeWhere[key] = { [Op.gte]: operatorValue.value };
             break;
           case 'lt':
-            sequelizeWhere[key] = { [Op.lt]: value.value };
+            sequelizeWhere[key] = { [Op.lt]: operatorValue.value };
             break;
           case 'lte':
-            sequelizeWhere[key] = { [Op.lte]: value.value };
+            sequelizeWhere[key] = { [Op.lte]: operatorValue.value };
             break;
           case 'like':
-            sequelizeWhere[key] = { [Op.iLike]: `%${value.value}%` };
+            sequelizeWhere[key] = { [Op.iLike]: `%${operatorValue.value}%` };
             break;
           case 'not':
-            sequelizeWhere[key] = { [Op.not]: value.value };
+            sequelizeWhere[key] = { [Op.not]: operatorValue.value };
             break;
           default:
-            sequelizeWhere[key] = value.value;
+            sequelizeWhere[key] = operatorValue.value;
         }
       } else {
         sequelizeWhere[key] = value;
@@ -506,7 +533,7 @@ export class SequelizeSocialAccountRepository extends AbstractBaseRepository<Soc
   /**
    * Executes a transaction
    */
-  protected async executeTransaction<R>(callback: (trx: Transaction) => Promise<R>): Promise<R> {
+  protected async executeTransaction<R>(callback: (trx: import('sequelize').Transaction | import('mongoose').ClientSession) => Promise<R>): Promise<R> {
     return await this.socialAccountModel.sequelize!.transaction(callback);
   }
 

@@ -1,11 +1,46 @@
 import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
 import { DatabaseFactory } from '../DatabaseFactory';
-import { DatabaseProvider, DatabaseConfig } from '../types';
-// import { DatabasePresets } from '../config/database.config';
+import { DatabaseProvider, DatabaseConfig, DatabaseConnection } from '../types';
+import { DatabasePresets } from '../config/database.config';
 
 // Mock the database connections
 jest.mock('../sequelize/SequelizeConnection');
 jest.mock('../mongoose/MongooseConnection');
+
+// Import the mocked classes
+import { SequelizeConnection } from '../sequelize/SequelizeConnection';
+import { MongooseConnection } from '../mongoose/MongooseConnection';
+
+// Create mock implementations
+const mockSequelizeConnection = SequelizeConnection as jest.MockedClass<typeof SequelizeConnection>;
+const mockMongooseConnection = MongooseConnection as jest.MockedClass<typeof MongooseConnection>;
+
+// Setup default mock implementations
+mockSequelizeConnection.mockImplementation(() => ({
+  connect: jest.fn(() => Promise.resolve()),
+  disconnect: jest.fn(() => Promise.resolve()),
+  isConnected: jest.fn(() => true),
+  getConnection: jest.fn(() => ({})),
+  transaction: jest.fn((callback: any) => callback({})),
+  migrate: jest.fn(() => Promise.resolve()),
+  seed: jest.fn(() => Promise.resolve()),
+  drop: jest.fn(() => Promise.resolve()),
+  healthCheck: jest.fn(() => Promise.resolve(true)),
+  getStats: jest.fn(() => Promise.resolve({}))
+} as any));
+
+mockMongooseConnection.mockImplementation(() => ({
+  connect: jest.fn(() => Promise.resolve()),
+  disconnect: jest.fn(() => Promise.resolve()),
+  isConnected: jest.fn(() => true),
+  getConnection: jest.fn(() => ({})),
+  transaction: jest.fn((callback: any) => callback({})),
+  migrate: jest.fn(() => Promise.resolve()),
+  seed: jest.fn(() => Promise.resolve()),
+  drop: jest.fn(() => Promise.resolve()),
+  healthCheck: jest.fn(() => Promise.resolve(true)),
+  getStats: jest.fn(() => Promise.resolve({}))
+ } as any));
 
 describe('DatabaseFactory', () => {
   let factory: DatabaseFactory;
@@ -163,7 +198,7 @@ describe('DatabaseFactory', () => {
     });
 
     it('should execute transaction successfully', async () => {
-      const result = await factory.transaction(async (_trx) => {
+      const result = await factory.transaction(async () => {
         // Mock transaction operations
         return { success: true };
       });
@@ -173,7 +208,7 @@ describe('DatabaseFactory', () => {
 
     it('should rollback transaction on error', async () => {
       await expect(
-        factory.transaction(async (_trx) => {
+        factory.transaction(async () => {
           throw new Error('Transaction error');
         })
       ).rejects.toThrow('Transaction error');
@@ -196,7 +231,21 @@ describe('DatabaseFactory', () => {
         port: 99999
       };
       
-      await expect(factory.initialize(invalidConfig)).rejects.toThrow();
+      // Mock the connection to throw an error for invalid config
+      mockSequelizeConnection.mockImplementationOnce(() => ({
+        connect: jest.fn(() => Promise.reject(new Error('Connection failed'))),
+        disconnect: jest.fn(() => Promise.resolve()),
+        isConnected: jest.fn(() => false),
+        getConnection: jest.fn(() => null),
+        transaction: jest.fn((callback: any) => callback({})),
+        migrate: jest.fn(() => Promise.resolve()),
+        seed: jest.fn(() => Promise.resolve()),
+        drop: jest.fn(() => Promise.resolve()),
+        healthCheck: jest.fn(() => Promise.resolve(false)),
+        getStats: jest.fn(() => Promise.resolve({}))
+      } as any));
+      
+      await expect(factory.initialize(invalidConfig)).rejects.toThrow('Connection failed');
     });
   });
 

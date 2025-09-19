@@ -20,7 +20,7 @@ export class MongooseSocialAccountRepository extends AbstractBaseRepository<Soci
   async create(data: Partial<SocialAccount>): Promise<SocialAccount> {
     try {
       // Validate required fields
-      this.validateRequiredFields(data, ['userId', 'provider', 'providerAccountId']);
+      this.validateRequiredFields(data, ['userId', 'provider', 'providerId']);
       
       // Validate provider
       if (data.provider && !this.validateProvider(data.provider)) {
@@ -66,7 +66,7 @@ export class MongooseSocialAccountRepository extends AbstractBaseRepository<Soci
   /**
    * Finds social account by provider and provider account ID
    */
-  async findByProvider(provider: string, providerAccountId: string): Promise<SocialAccount | null> {
+  async findByProvider(provider: string, providerId: string): Promise<SocialAccount | null> {
     try {
       if (!this.validateProvider(provider)) {
         return null;
@@ -74,7 +74,7 @@ export class MongooseSocialAccountRepository extends AbstractBaseRepository<Soci
 
       const socialAccount = await this.socialAccountModel.findOne({ 
         provider,
-        providerAccountId,
+        providerId,
         isActive: true 
       }).exec();
 
@@ -103,6 +103,27 @@ export class MongooseSocialAccountRepository extends AbstractBaseRepository<Soci
       return socialAccounts.map(account => this.mapDocumentToEntity(account));
     } catch (error) {
       this.handleDatabaseError(error, 'find social accounts by user id');
+    }
+  }
+
+  /**
+   * Finds social account by user ID and provider (required by SocialAccountRepository interface)
+   */
+  async findByUserIdAndProvider(userId: string, provider: string): Promise<SocialAccount | null> {
+    try {
+      if (!this.validateUUID(userId) || !this.validateProvider(provider)) {
+        return null;
+      }
+
+      const socialAccount = await this.socialAccountModel.findOne({
+        userId,
+        provider,
+        isActive: true
+      }).exec();
+
+      return socialAccount ? this.mapDocumentToEntity(socialAccount) : null;
+    } catch (error) {
+      this.handleDatabaseError(error, 'find social account by user id and provider');
     }
   }
 
@@ -269,14 +290,14 @@ export class MongooseSocialAccountRepository extends AbstractBaseRepository<Soci
   /**
    * Links social account to user
    */
-  async linkToUser(userId: string, provider: string, providerAccountId: string, data: Partial<SocialAccount>): Promise<SocialAccount> {
+  async linkToUser(userId: string, provider: string, providerId: string, data: Partial<SocialAccount>): Promise<SocialAccount> {
     try {
       if (!this.validateUUID(userId) || !this.validateProvider(provider)) {
         throw new ValidationError('Invalid user ID or provider', 'userId', userId);
       }
 
       // Check if account already exists
-      const existingAccount = await this.findByProvider(provider, providerAccountId);
+      const existingAccount = await this.findByProvider(provider, providerId);
       if (existingAccount) {
         // Update existing account
         return await this.update(existingAccount.id, {
@@ -291,7 +312,7 @@ export class MongooseSocialAccountRepository extends AbstractBaseRepository<Soci
         ...data,
         userId,
         provider,
-        providerAccountId
+        providerId
       });
     } catch (error) {
       this.handleDatabaseError(error, 'link social account to user');
@@ -493,29 +514,30 @@ export class MongooseSocialAccountRepository extends AbstractBaseRepository<Soci
         filter[key] = value;
       } else if (Array.isArray(value)) {
         filter[key] = { $in: value };
-      } else if (typeof value === 'object' && value.operator) {
+      } else if (typeof value === 'object' && value !== null && 'operator' in value) {
         // Handle complex operators
-        switch (value.operator) {
+        const operatorValue = value as { operator: string; value: unknown };
+        switch (operatorValue.operator) {
           case 'gt':
-            filter[key] = { $gt: value.value };
+            filter[key] = { $gt: operatorValue.value };
             break;
           case 'gte':
-            filter[key] = { $gte: value.value };
+            filter[key] = { $gte: operatorValue.value };
             break;
           case 'lt':
-            filter[key] = { $lt: value.value };
+            filter[key] = { $lt: operatorValue.value };
             break;
           case 'lte':
-            filter[key] = { $lte: value.value };
+            filter[key] = { $lte: operatorValue.value };
             break;
           case 'like':
-            filter[key] = { $regex: value.value, $options: 'i' };
+            filter[key] = { $regex: operatorValue.value, $options: 'i' };
             break;
           case 'not':
-            filter[key] = { $ne: value.value };
+            filter[key] = { $ne: operatorValue.value };
             break;
           default:
-            filter[key] = value.value;
+            filter[key] = operatorValue.value;
         }
       } else {
         filter[key] = value;
@@ -541,7 +563,7 @@ export class MongooseSocialAccountRepository extends AbstractBaseRepository<Soci
 
     // Apply sorting
     if (options.orderBy) {
-      const sortOrder = options.order === 'desc' ? -1 : 1;
+      const sortOrder = options.orderDirection === 'DESC' ? -1 : 1;
       query.sort({ [options.orderBy]: sortOrder });
     } else {
       query.sort({ createdAt: -1 });
@@ -581,14 +603,12 @@ export class MongooseSocialAccountRepository extends AbstractBaseRepository<Soci
       id: obj.id || obj._id.toString(),
       userId: obj.userId,
       provider: obj.provider,
-      providerAccountId: obj.providerAccountId,
+      providerId: obj.providerId,
       accessToken: obj.accessToken,
       refreshToken: obj.refreshToken,
-      tokenType: obj.tokenType,
       scope: obj.scope,
       tokenExpiresAt: obj.tokenExpiresAt,
       isActive: obj.isActive,
-      profile: obj.profile,
       metadata: obj.metadata,
       createdAt: obj.createdAt,
       updatedAt: obj.updatedAt
@@ -609,7 +629,7 @@ export class MongooseSocialAccountRepository extends AbstractBaseRepository<Soci
   /**
    * Executes a transaction using Mongoose sessions
    */
-  protected async executeTransaction<R>(callback: (session: import('mongoose').ClientSession) => Promise<R>): Promise<R> {
+  protected async executeTransaction<R>(callback: (session: import('sequelize').Transaction | import('mongoose').ClientSession) => Promise<R>): Promise<R> {
     const session = await this.socialAccountModel.startSession();
     
     try {
@@ -623,5 +643,49 @@ export class MongooseSocialAccountRepository extends AbstractBaseRepository<Soci
     } finally {
       await session.endSession();
     }
+  }
+
+  /**
+   * Builds a Mongoose filter from a WhereClause
+   */
+  protected buildWhereClause(where: WhereClause): FilterQuery<SocialAccountDocument> {
+    const filter: FilterQuery<SocialAccountDocument> = {};
+    
+    for (const [key, value] of Object.entries(where)) {
+      if (value === null || value === undefined) {
+        filter[key] = value;
+      } else if (Array.isArray(value)) {
+        filter[key] = { $in: value };
+      } else if (typeof value === 'object' && value !== null && 'operator' in value) {
+        // Handle complex operators
+        const operatorValue = value as { operator: string; value: unknown };
+        switch (operatorValue.operator) {
+          case 'gt':
+            filter[key] = { $gt: operatorValue.value };
+            break;
+          case 'gte':
+            filter[key] = { $gte: operatorValue.value };
+            break;
+          case 'lt':
+            filter[key] = { $lt: operatorValue.value };
+            break;
+          case 'lte':
+            filter[key] = { $lte: operatorValue.value };
+            break;
+          case 'like':
+            filter[key] = { $regex: operatorValue.value, $options: 'i' };
+            break;
+          case 'not':
+            filter[key] = { $ne: operatorValue.value };
+            break;
+          default:
+            filter[key] = operatorValue.value;
+        }
+      } else {
+        filter[key] = value;
+      }
+    }
+    
+    return filter;
   }
 }

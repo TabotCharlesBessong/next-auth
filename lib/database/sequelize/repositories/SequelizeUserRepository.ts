@@ -58,7 +58,7 @@ export class SequelizeUserRepository extends AbstractBaseRepository<User> implem
       }
 
       const user = await this.userModel.findByPk(id, {
-        attributes: this.buildSelectFields(options),
+        attributes: this.buildSelectFields(),
         include: this.buildIncludeClause(options),
       });
 
@@ -114,7 +114,7 @@ export class SequelizeUserRepository extends AbstractBaseRepository<User> implem
     try {
       const user = await this.userModel.findOne({
         where: this.buildWhereClause(where),
-        attributes: this.buildSelectFields(options),
+        attributes: this.buildSelectFields(),
         include: this.buildIncludeClause(options),
         order: [[this.buildOrderClause(options).split(' ')[0], this.buildOrderClause(options).split(' ')[1]]],
       });
@@ -134,7 +134,7 @@ export class SequelizeUserRepository extends AbstractBaseRepository<User> implem
       
       const users = await this.userModel.findAll({
         where: where ? this.buildWhereClause(where) : undefined,
-        attributes: this.buildSelectFields(options),
+        attributes: this.buildSelectFields(),
         include: this.buildIncludeClause(options),
         order: [[this.buildOrderClause(options).split(' ')[0], this.buildOrderClause(options).split(' ')[1]]],
         limit,
@@ -268,7 +268,6 @@ export class SequelizeUserRepository extends AbstractBaseRepository<User> implem
     try {
       const count = await this.userModel.count({
         where: this.buildWhereClause(where),
-        limit: 1,
       });
       return count > 0;
     } catch (error) {
@@ -336,29 +335,30 @@ export class SequelizeUserRepository extends AbstractBaseRepository<User> implem
         sequelizeWhere[key] = { [Op.is]: value };
       } else if (Array.isArray(value)) {
         sequelizeWhere[key] = { [Op.in]: value };
-      } else if (typeof value === 'object' && value.operator) {
-        // Handle complex operators
-        switch (value.operator) {
+      } else if (typeof value === 'object' && value !== null && 'operator' in value && 'value' in value) {
+        // Handle complex operators with proper type checking
+        const operatorValue = value as { operator: string; value: unknown };
+        switch (operatorValue.operator) {
           case 'gt':
-            sequelizeWhere[key] = { [Op.gt]: value.value };
+            sequelizeWhere[key] = { [Op.gt]: operatorValue.value };
             break;
           case 'gte':
-            sequelizeWhere[key] = { [Op.gte]: value.value };
+            sequelizeWhere[key] = { [Op.gte]: operatorValue.value };
             break;
           case 'lt':
-            sequelizeWhere[key] = { [Op.lt]: value.value };
+            sequelizeWhere[key] = { [Op.lt]: operatorValue.value };
             break;
           case 'lte':
-            sequelizeWhere[key] = { [Op.lte]: value.value };
+            sequelizeWhere[key] = { [Op.lte]: operatorValue.value };
             break;
           case 'like':
-            sequelizeWhere[key] = { [Op.iLike]: `%${value.value}%` };
+            sequelizeWhere[key] = { [Op.iLike]: `%${operatorValue.value}%` };
             break;
           case 'not':
-            sequelizeWhere[key] = { [Op.not]: value.value };
+            sequelizeWhere[key] = { [Op.not]: operatorValue.value };
             break;
           default:
-            sequelizeWhere[key] = value.value;
+            sequelizeWhere[key] = operatorValue.value;
         }
       } else {
         sequelizeWhere[key] = value;
@@ -371,7 +371,7 @@ export class SequelizeUserRepository extends AbstractBaseRepository<User> implem
   /**
    * Executes a transaction
    */
-  protected async executeTransaction<R>(callback: (trx: Transaction) => Promise<R>): Promise<R> {
+  protected async executeTransaction<R>(callback: (trx: import('sequelize').Transaction | import('mongoose').ClientSession) => Promise<R>): Promise<R> {
     return await this.userModel.sequelize!.transaction(callback);
   }
 

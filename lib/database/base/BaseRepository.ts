@@ -44,7 +44,7 @@ export abstract class AbstractBaseRepository<T> implements BaseRepository<T> {
     
     for (const [key, value] of Object.entries(data)) {
       if (value !== undefined && (!removeNull || value !== null)) {
-        sanitized[key as keyof T] = value;
+        (sanitized as Record<string, unknown>)[key] = value;
       }
     }
     
@@ -125,22 +125,24 @@ export abstract class AbstractBaseRepository<T> implements BaseRepository<T> {
     console.error(`Database error during ${operation}:`, error);
     
     // Handle specific database errors
-    if (error.code === '23505' || error.code === 'ER_DUP_ENTRY' || error.code === 11000) {
+    const errorWithCode = error as { code?: string | number };
+    if (errorWithCode.code === '23505' || errorWithCode.code === 'ER_DUP_ENTRY' || errorWithCode.code === 11000) {
       throw new DatabaseError('Duplicate entry', 'DUPLICATE_ENTRY', error);
     }
     
-    if (error.code === '23503' || error.code === 'ER_NO_REFERENCED_ROW_2') {
+    if (errorWithCode.code === '23503' || errorWithCode.code === 'ER_NO_REFERENCED_ROW_2') {
       throw new DatabaseError('Foreign key constraint violation', 'FOREIGN_KEY_VIOLATION', error);
     }
     
-    if (error.code === '23502' || error.code === 'ER_BAD_NULL_ERROR') {
+    if (errorWithCode.code === '23502' || errorWithCode.code === 'ER_BAD_NULL_ERROR') {
       throw new DatabaseError('Not null constraint violation', 'NOT_NULL_VIOLATION', error);
     }
     
     // Generic database error
+    const errorWithMessage = error as { message?: string; code?: string | number };
     throw new DatabaseError(
-      error.message || `Database error during ${operation}`,
-      error.code,
+      errorWithMessage.message || `Database error during ${operation}`,
+      errorWithMessage.code?.toString(),
       error
     );
   }
@@ -200,5 +202,5 @@ export abstract class AbstractBaseRepository<T> implements BaseRepository<T> {
   /**
    * Executes a transaction
    */
-  protected abstract executeTransaction<R>(callback: (trx: unknown) => Promise<R>): Promise<R>;
+  protected abstract executeTransaction<R>(callback: (trx: import('sequelize').Transaction | import('mongoose').ClientSession) => Promise<R>): Promise<R>;
 }

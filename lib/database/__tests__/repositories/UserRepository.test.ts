@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals
 import { SequelizeUserRepository } from '../../sequelize/repositories/SequelizeUserRepository';
 import { MongooseUserRepository } from '../../mongoose/repositories/MongooseUserRepository';
 import { UserRepository, User, CreateUserData, UpdateUserData, FindUserOptions } from '../../types';
-// import { DatabasePresets } from '../../config/database.config';
+import { UserModel as SequelizeUserModel } from '../../sequelize/models';
+import { UserModel as MongooseUserModel } from '../../mongoose/models';
 
 // Mock data
 const mockUser: User = {
@@ -11,11 +12,11 @@ const mockUser: User = {
   username: 'testuser',
   firstName: 'Test',
   lastName: 'User',
-  emailVerified: false,
   isActive: true,
   lastLoginAt: new Date(),
   createdAt: new Date(),
-  updatedAt: new Date()
+  updatedAt: new Date(),
+  isEmailVerified: false
 };
 
 const mockCreateData: CreateUserData = {
@@ -29,29 +30,49 @@ const mockCreateData: CreateUserData = {
 const mockUpdateData: UpdateUserData = {
   firstName: 'Updated',
   lastName: 'Name',
-  emailVerified: true
+  isEmailVerified: true
 };
+
+// Mock the models
+jest.mock('../../sequelize/models', () => ({
+  UserModel: {
+    create: jest.fn(),
+    findByPk: jest.fn(),
+    findOne: jest.fn(),
+    findAll: jest.fn(),
+    update: jest.fn(),
+    destroy: jest.fn(),
+    count: jest.fn(),
+    sequelize: {
+      transaction: jest.fn()
+    }
+  }
+}));
+
+jest.mock('../../mongoose/models', () => ({
+  UserModel: {
+    create: jest.fn(),
+    findById: jest.fn(),
+    findOne: jest.fn(),
+    find: jest.fn(),
+    findByIdAndUpdate: jest.fn(),
+    findByIdAndDelete: jest.fn(),
+    countDocuments: jest.fn()
+  }
+}));
 
 // Test suite for both Sequelize and Mongoose implementations
 const repositoryImplementations = [
   {
     name: 'SequelizeUserRepository',
     createRepository: () => {
-      const mockConnection = {
-        getSequelize: jest.fn(),
-        isConnected: jest.fn().mockReturnValue(true)
-      };
-      return new SequelizeUserRepository(mockConnection as unknown as typeof UserModel);
+      return new SequelizeUserRepository(SequelizeUserModel);
     }
   },
   {
     name: 'MongooseUserRepository',
     createRepository: () => {
-      const mockConnection = {
-        getMongoose: jest.fn(),
-        isConnected: jest.fn().mockReturnValue(true)
-      };
-      return new MongooseUserRepository(mockConnection as unknown as typeof UserModel);
+      return new MongooseUserRepository(MongooseUserModel);
     }
   }
 ];
@@ -191,20 +212,20 @@ repositoryImplementations.forEach(({ name, createRepository }) => {
       });
     });
 
-    describe('findByUsername', () => {
-      it('should find user by username', async () => {
-        jest.spyOn(repository, 'findByUsername').mockResolvedValue(mockUser);
+    describe('find by username functionality', () => {
+      it('should find user by username using findOne method', async () => {
+        jest.spyOn(repository, 'findOne').mockResolvedValue(mockUser);
         
-        const result = await repository.findByUsername('testuser');
+        const result = await repository.findOne({ username: 'testuser' });
         
         expect(result).toEqual(mockUser);
-        expect(repository.findByUsername).toHaveBeenCalledWith('testuser');
+        expect(repository.findOne).toHaveBeenCalledWith({ username: 'testuser' });
       });
 
       it('should return null for non-existent username', async () => {
-        jest.spyOn(repository, 'findByUsername').mockResolvedValue(null);
+        jest.spyOn(repository, 'findOne').mockResolvedValue(null);
         
-        const result = await repository.findByUsername('nonexistent');
+        const result = await repository.findOne({ username: 'nonexistent' });
         
         expect(result).toBeNull();
       });
@@ -230,39 +251,41 @@ repositoryImplementations.forEach(({ name, createRepository }) => {
         
         jest.spyOn(repository, 'findMany').mockResolvedValue(mockUsers);
         
-        const result = await repository.findMany(options);
+        const result = await repository.findMany(undefined, options);
         
         expect(result).toEqual(mockUsers);
-        expect(repository.findMany).toHaveBeenCalledWith(options);
+        expect(repository.findMany).toHaveBeenCalledWith(undefined, options);
       });
 
       it('should find users with filters', async () => {
+        const whereClause = {
+          isActive: true,
+          isEmailVerified: true
+        };
         const options: FindUserOptions = {
-          where: {
-            isActive: true,
-            emailVerified: true
-          }
+          limit: 10
         };
         
         jest.spyOn(repository, 'findMany').mockResolvedValue([mockUser]);
         
-        const result = await repository.findMany(options);
+        const result = await repository.findMany(whereClause, options);
         
         expect(result).toEqual([mockUser]);
-        expect(repository.findMany).toHaveBeenCalledWith(options);
+        expect(repository.findMany).toHaveBeenCalledWith(whereClause, options);
       });
 
       it('should find users with sorting', async () => {
         const options: FindUserOptions = {
-          orderBy: [['createdAt', 'DESC']]
+          orderBy: 'createdAt',
+          orderDirection: 'DESC'
         };
         
         jest.spyOn(repository, 'findMany').mockResolvedValue(mockUsers);
         
-        const result = await repository.findMany(options);
+        const result = await repository.findMany(undefined, options);
         
         expect(result).toEqual(mockUsers);
-        expect(repository.findMany).toHaveBeenCalledWith(options);
+        expect(repository.findMany).toHaveBeenCalledWith(undefined, options);
       });
     });
 
@@ -279,15 +302,15 @@ repositoryImplementations.forEach(({ name, createRepository }) => {
       });
 
       it('should update user with transaction', async () => {
-        const mockTransaction = {};
+        const mockUpdateOptions = { where: { id: '1' } };
         const updatedUser = { ...mockUser, ...mockUpdateData };
         
         jest.spyOn(repository, 'update').mockResolvedValue(updatedUser);
         
-        const result = await repository.update('1', mockUpdateData, mockTransaction);
+        const result = await repository.update('1', mockUpdateData, mockUpdateOptions);
         
         expect(result).toEqual(updatedUser);
-        expect(repository.update).toHaveBeenCalledWith('1', mockUpdateData, mockTransaction);
+        expect(repository.update).toHaveBeenCalledWith('1', mockUpdateData, mockUpdateOptions);
       });
 
       it('should return null for non-existent user', async () => {
@@ -324,14 +347,14 @@ repositoryImplementations.forEach(({ name, createRepository }) => {
       });
 
       it('should delete user with transaction', async () => {
-        const mockTransaction = {};
+        const mockDeleteOptions = { where: { id: '1' } };
         
         jest.spyOn(repository, 'delete').mockResolvedValue(true);
         
-        const result = await repository.delete('1', mockTransaction);
+        const result = await repository.delete('1', mockDeleteOptions);
         
         expect(result).toBe(true);
-        expect(repository.delete).toHaveBeenCalledWith('1', mockTransaction);
+        expect(repository.delete).toHaveBeenCalledWith('1', mockDeleteOptions);
       });
 
       it('should return false for non-existent user', async () => {
@@ -354,35 +377,35 @@ repositoryImplementations.forEach(({ name, createRepository }) => {
       });
 
       it('should count users with filters', async () => {
-        const options: FindUserOptions = {
-          where: {
-            isActive: true
-          }
+        const whereClause = {
+          isActive: true
         };
         
         jest.spyOn(repository, 'count').mockResolvedValue(3);
         
-        const result = await repository.count(options);
+        const result = await repository.count(whereClause);
         
         expect(result).toBe(3);
-        expect(repository.count).toHaveBeenCalledWith(options);
+        expect(repository.count).toHaveBeenCalledWith(whereClause);
       });
     });
 
     describe('exists', () => {
       it('should check if user exists by id', async () => {
+        const whereClause = { id: '1' };
         jest.spyOn(repository, 'exists').mockResolvedValue(true);
         
-        const result = await repository.exists('1');
+        const result = await repository.exists(whereClause);
         
         expect(result).toBe(true);
-        expect(repository.exists).toHaveBeenCalledWith('1');
+        expect(repository.exists).toHaveBeenCalledWith(whereClause);
       });
 
       it('should return false for non-existent user', async () => {
+        const whereClause = { id: '999' };
         jest.spyOn(repository, 'exists').mockResolvedValue(false);
         
-        const result = await repository.exists('999');
+        const result = await repository.exists(whereClause);
         
         expect(result).toBe(false);
       });
@@ -390,72 +413,66 @@ repositoryImplementations.forEach(({ name, createRepository }) => {
 
     describe('updateLastLogin', () => {
       it('should update last login timestamp', async () => {
-        const updatedUser = {
-          ...mockUser,
-          lastLoginAt: new Date()
-        };
-        
-        jest.spyOn(repository, 'updateLastLogin').mockResolvedValue(updatedUser);
+        jest.spyOn(repository, 'updateLastLogin').mockResolvedValue(undefined);
         
         const result = await repository.updateLastLogin('1');
         
-        expect(result).toEqual(updatedUser);
+        expect(result).toBeUndefined();
         expect(repository.updateLastLogin).toHaveBeenCalledWith('1');
       });
 
-      it('should return null for non-existent user', async () => {
-        jest.spyOn(repository, 'updateLastLogin').mockResolvedValue(null);
+      it('should handle non-existent user', async () => {
+        jest.spyOn(repository, 'updateLastLogin').mockResolvedValue(undefined);
         
         const result = await repository.updateLastLogin('999');
         
-        expect(result).toBeNull();
+        expect(result).toBeUndefined();
       });
     });
 
-    describe('verifyEmail', () => {
-      it('should verify user email', async () => {
+    describe('verify email functionality', () => {
+      it('should verify user email using update method', async () => {
         const verifiedUser = {
           ...mockUser,
-          emailVerified: true,
-          emailVerifiedAt: new Date()
+          isEmailVerified: true
         };
         
-        jest.spyOn(repository, 'verifyEmail').mockResolvedValue(verifiedUser);
+        jest.spyOn(repository, 'update').mockResolvedValue(verifiedUser);
         
-        const result = await repository.verifyEmail('1');
+        const result = await repository.update('1', { isEmailVerified: true });
         
         expect(result).toEqual(verifiedUser);
-        expect(repository.verifyEmail).toHaveBeenCalledWith('1');
+        expect(repository.update).toHaveBeenCalledWith('1', { isEmailVerified: true });
       });
 
-      it('should return null for non-existent user', async () => {
-        jest.spyOn(repository, 'verifyEmail').mockResolvedValue(null);
+      it('should return null for non-existent user when verifying email', async () => {
+        jest.spyOn(repository, 'update').mockResolvedValue(null);
         
-        const result = await repository.verifyEmail('999');
+        const result = await repository.update('999', { isEmailVerified: true });
         
         expect(result).toBeNull();
       });
     });
 
-    describe('deactivateUser', () => {
-      it('should deactivate user', async () => {
+    describe('deactivate user functionality', () => {
+      it('should deactivate user using update method', async () => {
         const deactivatedUser = {
           ...mockUser,
           isActive: false
         };
         
-        jest.spyOn(repository, 'deactivateUser').mockResolvedValue(deactivatedUser);
+        jest.spyOn(repository, 'update').mockResolvedValue(deactivatedUser);
         
-        const result = await repository.deactivateUser('1');
+        const result = await repository.update('1', { isActive: false });
         
         expect(result).toEqual(deactivatedUser);
-        expect(repository.deactivateUser).toHaveBeenCalledWith('1');
+        expect(repository.update).toHaveBeenCalledWith('1', { isActive: false });
       });
 
-      it('should return null for non-existent user', async () => {
-        jest.spyOn(repository, 'deactivateUser').mockResolvedValue(null);
+      it('should return null for non-existent user when updating', async () => {
+        jest.spyOn(repository, 'update').mockResolvedValue(null);
         
-        const result = await repository.deactivateUser('999');
+        const result = await repository.update('999', { isActive: false });
         
         expect(result).toBeNull();
       });
@@ -490,7 +507,7 @@ repositoryImplementations.forEach(({ name, createRepository }) => {
         );
         
         await expect(
-          repository.update('1', mockUpdateData, mockTransaction)
+          repository.update('1', mockUpdateData, { where: { id: '1' } } as any)
         ).rejects.toThrow('Transaction rolled back');
       });
     });

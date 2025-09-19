@@ -33,7 +33,7 @@ export interface MigrationRecord {
  */
 export class MigrationManager {
   private config: DatabaseConfig;
-  private connection: DatabaseConnection;
+  private connection!: DatabaseConnection;
   private migrationsPath: string;
   private migrations: Migration[] = [];
 
@@ -243,9 +243,10 @@ export class MigrationManager {
    * Ensures migrations table exists
    */
   private async ensureMigrationsTable(): Promise<void> {
+    const rawConnection = this.connection.getConnection();
     switch (this.config.provider) {
       case DatabaseProvider.POSTGRESQL:
-        await this.connection.query(`
+        await (rawConnection as { query: (sql: string) => Promise<unknown> }).query(`
           CREATE TABLE IF NOT EXISTS migrations (
             id VARCHAR(255) PRIMARY KEY,
             name VARCHAR(255) NOT NULL,
@@ -258,7 +259,7 @@ export class MigrationManager {
         break;
         
       case DatabaseProvider.MYSQL:
-        await this.connection.query(`
+        await (rawConnection as { query: (sql: string) => Promise<unknown> }).query(`
           CREATE TABLE IF NOT EXISTS migrations (
             id VARCHAR(255) PRIMARY KEY,
             name VARCHAR(255) NOT NULL,
@@ -280,33 +281,35 @@ export class MigrationManager {
    * Gets applied migrations from database
    */
   private async getAppliedMigrations(): Promise<MigrationRecord[]> {
+    const rawConnection = this.connection.getConnection();
     switch (this.config.provider) {
       case DatabaseProvider.POSTGRESQL:
       case DatabaseProvider.MYSQL:
-        const results = await this.connection.query(
+        const results = await (rawConnection as { query: (sql: string, params: unknown[]) => Promise<unknown[]> }).query(
           'SELECT * FROM migrations WHERE provider = ? ORDER BY applied_at ASC',
           [this.config.provider]
         );
-        return results.map((row: Record<string, unknown>) => ({
-          id: row.id,
-          name: row.name,
-          version: row.version,
-          provider: row.provider,
-          appliedAt: new Date(row.applied_at),
-          checksum: row.checksum
+        return (results as Record<string, unknown>[]).map((row: Record<string, unknown>) => ({
+          id: row.id as string,
+          name: row.name as string,
+          version: row.version as string,
+          provider: row.provider as DatabaseProvider,
+          appliedAt: new Date(row.applied_at as string | Date),
+          checksum: row.checksum as string
         }));
         
       case DatabaseProvider.MONGODB:
-        const db = await this.connection.getDatabase();
+        const mongoConnection = this.connection.getConnection() as { db: () => { collection: (name: string) => { find: (query: unknown) => { sort: (sort: unknown) => { toArray: () => Promise<unknown[]> } } } } };
+        const db = mongoConnection.db();
         const collection = db.collection('migrations');
         const docs = await collection.find({ provider: this.config.provider }).sort({ appliedAt: 1 }).toArray();
-        return docs.map(doc => ({
-          id: doc.id,
-          name: doc.name,
-          version: doc.version,
-          provider: doc.provider,
-          appliedAt: doc.appliedAt,
-          checksum: doc.checksum
+        return (docs as Record<string, unknown>[]).map((doc: Record<string, unknown>) => ({
+          id: doc.id as string,
+          name: doc.name as string,
+          version: doc.version as string,
+          provider: doc.provider as DatabaseProvider,
+          appliedAt: doc.appliedAt as Date,
+          checksum: doc.checksum as string
         }));
         
       default:
@@ -318,19 +321,21 @@ export class MigrationManager {
    * Records applied migration
    */
   private async recordMigration(record: MigrationRecord): Promise<void> {
+    const rawConnection = this.connection.getConnection();
     switch (this.config.provider) {
       case DatabaseProvider.POSTGRESQL:
       case DatabaseProvider.MYSQL:
-        await this.connection.query(
+        await (rawConnection as { query: (sql: string, params: unknown[]) => Promise<unknown> }).query(
           'INSERT INTO migrations (id, name, version, provider, applied_at, checksum) VALUES (?, ?, ?, ?, ?, ?)',
           [record.id, record.name, record.version, record.provider, record.appliedAt, record.checksum]
         );
         break;
         
       case DatabaseProvider.MONGODB:
-        const db = await this.connection.getDatabase();
-        const collection = db.collection('migrations');
-        await collection.insertOne(record);
+        const mongoConnection1 = this.connection.getConnection() as { db: () => { collection: (name: string) => { insertOne: (doc: unknown) => Promise<unknown> } } };
+        const db1 = mongoConnection1.db();
+        const collection1 = db1.collection('migrations');
+        await collection1.insertOne(record);
         break;
     }
   }
@@ -339,16 +344,18 @@ export class MigrationManager {
    * Removes migration record
    */
   private async removeMigrationRecord(id: string): Promise<void> {
+    const rawConnection = this.connection.getConnection();
     switch (this.config.provider) {
       case DatabaseProvider.POSTGRESQL:
       case DatabaseProvider.MYSQL:
-        await this.connection.query('DELETE FROM migrations WHERE id = ?', [id]);
+        await (rawConnection as { query: (sql: string, params: unknown[]) => Promise<unknown> }).query('DELETE FROM migrations WHERE id = ?', [id]);
         break;
         
       case DatabaseProvider.MONGODB:
-        const db = await this.connection.getDatabase();
-        const collection = db.collection('migrations');
-        await collection.deleteOne({ id });
+        const mongoConnection2 = this.connection.getConnection() as { db: () => { collection: (name: string) => { deleteOne: (query: unknown) => Promise<unknown> } } };
+        const db2 = mongoConnection2.db();
+        const collection2 = db2.collection('migrations');
+        await collection2.deleteOne({ id });
         break;
     }
   }

@@ -6,8 +6,10 @@
  * and Mongoose ORMs.
  */
 
-import { DatabasePresets } from './config/database.config';
+import { DatabasePresets, getDatabaseConfig, DatabaseConfigManager } from './config/database.config';
 import { DatabaseFactory } from './DatabaseFactory';
+import { MigrationManager } from './migrations/MigrationManager';
+import type { DatabaseConfig } from './types';
 
 // Core types and interfaces
 export * from './types';
@@ -29,6 +31,7 @@ export {
 } from './config/database.config';
 
 // Base repository
+export { AbstractBaseRepository } from './base/BaseRepository';
 
 // Sequelize implementations
 export { SequelizeConnection } from './sequelize/SequelizeConnection';
@@ -46,13 +49,15 @@ export { SequelizeSocialAccountRepository } from './sequelize/repositories/Seque
 
 // Mongoose implementations
 export { MongooseConnection } from './mongoose/MongooseConnection';
-export {
+export type {
   UserDocument as MongooseUserDocument,
   SessionDocument as MongooseSessionDocument,
   SocialAccountDocument as MongooseSocialAccountDocument,
   PasswordResetDocument as MongoosePasswordResetDocument,
   EmailVerificationDocument as MongooseEmailVerificationDocument,
-  AuditLogDocument as MongooseAuditLogDocument,
+  AuditLogDocument as MongooseAuditLogDocument
+} from './mongoose/models';
+export {
   UserModel as MongooseUserModel,
   SessionModel as MongooseSessionModel,
   SocialAccountModel as MongooseSocialAccountModel,
@@ -69,7 +74,7 @@ export const DatabaseUtils = {
   /**
    * Creates a database factory instance with the specified configuration
    */
-  createFactory: async (config?: Record<string, unknown>) => {
+  createFactory: async (config?: DatabaseConfig) => {
     const factory = DatabaseFactory.getInstance();
     if (config) {
       await factory.initialize(config);
