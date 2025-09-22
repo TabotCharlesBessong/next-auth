@@ -2,7 +2,7 @@
 export { AuthService, createAuthService } from './AuthService';
 export { TokenService, createTokenService } from './TokenService';
 export { EmailService, createEmailService, defaultEmailTemplates, createDefaultEmailConfig } from './EmailService';
-export { HashService, createHashService, defaultHashService } from './HashService';
+export { HashService, createHashService, hashService } from './HashService';
 export { OAuthService, createOAuthService } from './OAuthService';
 export { 
   SecurityService, 

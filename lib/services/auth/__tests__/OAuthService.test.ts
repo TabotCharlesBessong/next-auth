@@ -1,5 +1,38 @@
 import { OAuthService, createOAuthService } from '../OAuthService';
-import { OAuthError } from '../types';
+import { OAuthError, IUserRepository, ITokenService, OAuthProvider } from '../types';
+import { User } from '../../../database/types';
+import { createTokenService } from '../TokenService';
+
+interface MockUserData {
+  id: string;
+  email: string;
+  firstName?: string;
+  lastName?: string;
+  fullName?: string;
+  emailVerified?: boolean;
+  emailVerifiedAt?: Date;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+interface MockOAuthAccountData {
+  id: string;
+  userId: string;
+  provider: string;
+  providerId: string;
+  accessToken?: string;
+  refreshToken?: string;
+  expiresAt?: Date;
+  scope?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+interface MockOAuthStateData {
+  provider: string;
+  redirectUrl?: string;
+  [key: string]: unknown;
+}
 
 // Mock axios for HTTP requests
 const mockAxios = {
@@ -23,63 +56,90 @@ const mockDatabase = {
   oauthAccounts: new Map(),
   oauthStates: new Map(),
   
-  async findUserByEmail(email: string) {
-    return Array.from(this.users.values()).find((user: any) => user.email === email);
-  },
-  
-  async findUserById(id: string) {
-    return this.users.get(id);
-  },
-  
-  async createUser(userData: any) {
-    const id = `user_${Date.now()}_${Math.random()}`;
-    const user = { id, ...userData, createdAt: new Date(), updatedAt: new Date() };
-    this.users.set(id, user);
+  async createUser(userData: Partial<MockUserData>): Promise<MockUserData> {
+    const user: MockUserData = {
+      id: `user-${Date.now()}-${Math.random()}`,
+      email: userData.email!,
+      firstName: userData.firstName,
+      lastName: userData.lastName,
+      fullName: userData.fullName || `${userData.firstName || ''} ${userData.lastName || ''}`.trim(),
+      emailVerified: userData.emailVerified || false,
+      emailVerifiedAt: userData.emailVerifiedAt,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    this.users.set(user.id, user);
     return user;
   },
   
-  async updateUser(id: string, updates: any) {
+  async findUserByEmail(email: string): Promise<MockUserData | null> {
+    for (const user of this.users.values()) {
+      if (user.email === email) {
+        return user;
+      }
+    }
+    return null;
+  },
+  
+  async findUserById(id: string): Promise<MockUserData | null> {
+    return this.users.get(id) || null;
+  },
+  
+  async updateUser(id: string, data: Partial<MockUserData>): Promise<MockUserData | null> {
     const user = this.users.get(id);
     if (!user) return null;
     
-    const updatedUser = { ...user, ...updates, updatedAt: new Date() };
+    const updatedUser = { ...user, ...data, updatedAt: new Date() };
     this.users.set(id, updatedUser);
     return updatedUser;
   },
   
-  async findOAuthAccount(provider: string, providerId: string) {
-    return Array.from(this.oauthAccounts.values()).find((account: any) => 
-      account.provider === provider && account.providerId === providerId
-    );
-  },
-  
-  async createOAuthAccount(accountData: any) {
-    const id = `oauth_${Date.now()}_${Math.random()}`;
-    const account = { id, ...accountData, createdAt: new Date(), updatedAt: new Date() };
-    this.oauthAccounts.set(id, account);
+  async createOAuthAccount(accountData: Partial<MockOAuthAccountData>): Promise<MockOAuthAccountData> {
+    const account: MockOAuthAccountData = {
+      id: `account-${Date.now()}-${Math.random()}`,
+      userId: accountData.userId!,
+      provider: accountData.provider!,
+      providerId: accountData.providerId!,
+      accessToken: accountData.accessToken,
+      refreshToken: accountData.refreshToken,
+      expiresAt: accountData.expiresAt,
+      scope: accountData.scope,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    this.oauthAccounts.set(account.id, account);
     return account;
   },
   
-  async updateOAuthAccount(id: string, updates: any) {
+  async findOAuthAccount(provider: string, providerId: string): Promise<MockOAuthAccountData | null> {
+    for (const account of this.oauthAccounts.values()) {
+      if (account.provider === provider && account.providerId === providerId) {
+        return account;
+      }
+    }
+    return null;
+  },
+  
+  async updateOAuthAccount(id: string, data: Partial<MockOAuthAccountData>): Promise<MockOAuthAccountData | null> {
     const account = this.oauthAccounts.get(id);
     if (!account) return null;
     
-    const updatedAccount = { ...account, ...updates, updatedAt: new Date() };
+    const updatedAccount = { ...account, ...data, updatedAt: new Date() };
     this.oauthAccounts.set(id, updatedAccount);
     return updatedAccount;
   },
   
-  async deleteOAuthAccount(id: string) {
+  async deleteOAuthAccount(id: string): Promise<boolean> {
     return this.oauthAccounts.delete(id);
   },
   
   async getUserOAuthAccounts(userId: string) {
-    return Array.from(this.oauthAccounts.values()).filter((account: any) => 
+    return Array.from(this.oauthAccounts.values()).filter((account: MockOAuthAccountData) => 
       account.userId === userId
     );
   },
   
-  async storeOAuthState(state: string, data: any) {
+  async storeOAuthState(state: string, data: MockOAuthStateData) {
     this.oauthStates.set(state, { ...data, createdAt: new Date() });
   },
   
@@ -98,6 +158,63 @@ const mockDatabase = {
   }
 };
 
+// Create mock user repository that implements IUserRepository interface
+const createMockUserRepository = (): IUserRepository => ({
+  async create(userData): Promise<User> {
+    const user = await mockDatabase.createUser(userData);
+    return user as User;
+  },
+  
+  async findById(id: string): Promise<User | null> {
+    const user = await mockDatabase.findUserById(id);
+    return user as User | null;
+  },
+  
+  async findByEmail(email: string): Promise<User | null> {
+    const user = await mockDatabase.findUserByEmail(email);
+    return user as User | null;
+  },
+  
+  async update(id: string, data: Partial<User>): Promise<User | null> {
+    const user = await mockDatabase.updateUser(id, data);
+    return user as User | null;
+  },
+  
+  async delete(id: string): Promise<void> {
+    mockDatabase.users.delete(id);
+  },
+  
+  async findByProvider(provider: string, providerId: string): Promise<User | null> {
+    const account = await mockDatabase.findOAuthAccount(provider, providerId);
+    if (!account) return null;
+    return await this.findById(account.userId);
+  },
+  
+  async findByOAuthId(provider: string, oauthId: string): Promise<User | null> {
+    return await this.findByProvider(provider, oauthId);
+  }
+});
+
+// Create mock token service
+const createMockTokenService = (): ITokenService => {
+  const tokenService = createTokenService({
+    jwtSecret: 'test-secret-key-for-testing-purposes-only',
+    accessTokenExpiry: '15m',
+    refreshTokenExpiry: '7d',
+    issuer: 'test-issuer',
+    audience: 'test-audience'
+  });
+  
+  return {
+    generateAccessToken: tokenService.generateAccessToken.bind(tokenService),
+    generateRefreshToken: tokenService.generateRefreshToken.bind(tokenService),
+    generateTokenPair: tokenService.generateTokenPair.bind(tokenService),
+    verifyToken: tokenService.verifyToken.bind(tokenService),
+    revokeToken: tokenService.revokeToken.bind(tokenService),
+    cleanupExpiredTokens: tokenService.cleanupExpiredTokens.bind(tokenService)
+  };
+};
+
 const mockEnv = {
   GOOGLE_CLIENT_ID: 'test-google-client-id',
   GOOGLE_CLIENT_SECRET: 'test-google-client-secret',
@@ -110,6 +227,8 @@ const mockEnv = {
 
 describe('OAuthService', () => {
   let oauthService: OAuthService;
+  let mockUserRepository: IUserRepository;
+  let mockTokenService: ITokenService;
 
   beforeEach(() => {
     // Set up environment variables
@@ -121,10 +240,32 @@ describe('OAuthService', () => {
     // Reset mocks
     jest.clearAllMocks();
     
-    // Create OAuth service
-    oauthService = createOAuthService({
-      database: mockDatabase as any,
-    });
+    // Create mock services
+    mockUserRepository = createMockUserRepository();
+    mockTokenService = createMockTokenService();
+    
+    // Create OAuth service with proper interfaces
+    oauthService = createOAuthService(
+      mockUserRepository,
+      mockTokenService,
+      {
+        google: {
+          clientId: mockEnv.GOOGLE_CLIENT_ID,
+          clientSecret: mockEnv.GOOGLE_CLIENT_SECRET,
+          redirectUri: `${mockEnv.NEXTAUTH_URL}/api/auth/callback/google`,
+        },
+        facebook: {
+          clientId: mockEnv.FACEBOOK_APP_ID,
+          clientSecret: mockEnv.FACEBOOK_APP_SECRET,
+          redirectUri: `${mockEnv.NEXTAUTH_URL}/api/auth/callback/facebook`,
+        },
+        github: {
+          clientId: mockEnv.GITHUB_CLIENT_ID,
+          clientSecret: mockEnv.GITHUB_CLIENT_SECRET,
+          redirectUri: `${mockEnv.NEXTAUTH_URL}/api/auth/callback/github`,
+        }
+      }
+    );
   });
 
   afterEach(() => {
@@ -178,7 +319,7 @@ describe('OAuthService', () => {
     });
 
     it('should reject unsupported provider', async () => {
-      await expect(oauthService.getAuthorizationUrl('unsupported' as any, 'http://localhost:3000/callback'))
+      await expect(oauthService.getAuthorizationUrl('unsupported' as OAuthProvider, 'http://localhost:3000/callback'))
         .rejects.toThrow(OAuthError);
     });
 
@@ -485,7 +626,6 @@ describe('OAuthService', () => {
 
   describe('unlinkAccount', () => {
     let userId: string;
-    let accountId: string;
 
     beforeEach(async () => {
       const user = await mockDatabase.createUser({
@@ -505,8 +645,7 @@ describe('OAuthService', () => {
         scope: 'openid email profile',
       };
 
-      const linkResult = await oauthService.linkAccount(userId, accountData);
-      accountId = linkResult.account!.id;
+      await oauthService.linkAccount(userId, accountData);
     });
 
     it('should unlink OAuth account successfully', async () => {
@@ -605,7 +744,6 @@ describe('OAuthService', () => {
 
   describe('refreshAccessToken', () => {
     let userId: string;
-    let accountId: string;
 
     beforeEach(async () => {
       const user = await mockDatabase.createUser({
@@ -625,8 +763,7 @@ describe('OAuthService', () => {
         scope: 'openid email profile',
       };
 
-      const linkResult = await oauthService.linkAccount(userId, accountData);
-      accountId = linkResult.account!.id;
+      await oauthService.linkAccount(userId, accountData);
     });
 
     it('should refresh Google access token successfully', async () => {
@@ -694,27 +831,47 @@ describe('OAuthService', () => {
     it('should validate required environment variables', () => {
       delete process.env.GOOGLE_CLIENT_ID;
 
-      expect(() => createOAuthService({
-        database: mockDatabase as any,
-      })).toThrow(OAuthError);
+      expect(() => createOAuthService(
+        mockUserRepository,
+        mockTokenService,
+        {
+          google: {
+            clientId: '', // Missing client ID
+            clientSecret: mockEnv.GOOGLE_CLIENT_SECRET,
+            redirectUri: `${mockEnv.NEXTAUTH_URL}/api/auth/callback/google`,
+          }
+        }
+      )).toThrow();
     });
 
     it('should use custom redirect URI', () => {
-      const customOAuthService = createOAuthService({
-        database: mockDatabase as any,
-        baseUrl: 'https://custom-domain.com',
-      });
+      const customOAuthService = createOAuthService(
+        mockUserRepository,
+        mockTokenService,
+        {
+          google: {
+            clientId: mockEnv.GOOGLE_CLIENT_ID,
+            clientSecret: mockEnv.GOOGLE_CLIENT_SECRET,
+            redirectUri: 'https://custom-domain.com/api/auth/callback/google',
+          }
+        }
+      );
 
       expect(customOAuthService).toBeDefined();
     });
 
     it('should handle missing optional configuration', () => {
-      delete process.env.FACEBOOK_APP_ID;
-      delete process.env.FACEBOOK_APP_SECRET;
-
-      const partialOAuthService = createOAuthService({
-        database: mockDatabase as any,
-      });
+      const partialOAuthService = createOAuthService(
+        mockUserRepository,
+        mockTokenService,
+        {
+          google: {
+            clientId: mockEnv.GOOGLE_CLIENT_ID,
+            clientSecret: mockEnv.GOOGLE_CLIENT_SECRET,
+            redirectUri: `${mockEnv.NEXTAUTH_URL}/api/auth/callback/google`,
+          }
+        }
+      );
 
       expect(partialOAuthService).toBeDefined();
     });

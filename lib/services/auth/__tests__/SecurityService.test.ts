@@ -241,7 +241,7 @@ describe('SecurityService', () => {
 
         try {
           securityService.checkRateLimit('login', identifier);
-        } catch (error) {
+        } catch {
           // Expected to throw
         }
 
@@ -419,7 +419,7 @@ describe('SecurityService', () => {
           for (let j = 0; j < 10; j++) {
             securityService.checkRateLimit('login', ip);
           }
-        } catch (error) {
+        } catch {
           // Expected rate limit errors
         }
       }
@@ -536,7 +536,7 @@ describe('SecurityService', () => {
         const token = securityService.generateCSRFToken(sessionId);
 
         // Manually expire the token by modifying internal state
-        const tokenStore = (securityService as any).csrfTokenStore;
+        const tokenStore = (securityService as SecurityService & { csrfTokenStore: Map<string, unknown> }).csrfTokenStore;
         const tokenData = tokenStore.get(token);
         if (tokenData) {
           tokenData.expiresAt = new Date(Date.now() - 1000); // Expired 1 second ago

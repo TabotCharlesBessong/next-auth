@@ -1,6 +1,5 @@
 import crypto from 'crypto';
 import { AuthError } from './types';
-import { rateLimitSchema } from './validation';
 
 interface RateLimitConfig {
   windowMs: number; // Time window in milliseconds
@@ -584,16 +583,32 @@ export const createProductionSecurityConfig = (): Partial<SecurityConfig> => ({
 });
 
 // Middleware helper functions
+interface MiddlewareRequest {
+  method?: string;
+  headers: Record<string, string | string[] | undefined>;
+  body?: Record<string, unknown>;
+  sessionID?: string;
+  session?: { id?: string };
+  ip?: string;
+  connection?: { remoteAddress?: string };
+}
+
+interface MiddlewareResponse {
+  status: (code: number) => { json: (data: Record<string, unknown>) => void };
+}
+
+type NextFunction = () => void;
+
 export const createCSRFMiddleware = (securityService: SecurityService) => {
-  return (req: any, res: any, next: any) => {
+  return (req: MiddlewareRequest, res: MiddlewareResponse, next: NextFunction) => {
     if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') {
       return next();
     }
 
-    const token = req.headers[securityService.getConfig().csrf.headerName] || req.body._csrf;
+    const token = req.headers[securityService.getConfig().csrf.headerName] || req.body?._csrf;
     const sessionId = req.sessionID || req.session?.id;
 
-    if (!securityService.validateCSRFToken(token, sessionId)) {
+    if (!securityService.validateCSRFToken(token as string, sessionId as string)) {
       return res.status(403).json({ error: 'Invalid CSRF token' });
     }
 
@@ -602,10 +617,10 @@ export const createCSRFMiddleware = (securityService: SecurityService) => {
 };
 
 export const createRateLimitMiddleware = (securityService: SecurityService, endpoint: keyof SecurityConfig['rateLimit']) => {
-  return (req: any, res: any, next: any) => {
+  return (req: MiddlewareRequest, res: MiddlewareResponse, next: NextFunction) => {
     try {
-      const identifier = req.ip || req.connection.remoteAddress;
-      securityService.checkRateLimit(endpoint, identifier);
+      const identifier = req.ip || req.connection?.remoteAddress;
+      securityService.checkRateLimit(endpoint, identifier as string);
       next();
     } catch (error) {
       if (error instanceof AuthError && error.code === 'RATE_LIMIT_EXCEEDED') {

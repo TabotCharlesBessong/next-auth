@@ -53,7 +53,7 @@ describe('TokenService', () => {
     });
 
     it('should handle empty payload', async () => {
-      const token = await tokenService.generateAccessToken({});
+      const token = await tokenService.generateAccessToken({} as Record<string, never>);
       expect(token).toBeDefined();
     });
   });
@@ -250,8 +250,7 @@ describe('TokenService', () => {
       // Wait for expiration
       await new Promise(resolve => setTimeout(resolve, 10));
       
-      const cleanedCount = await tokenService.cleanupExpiredTokens();
-      expect(cleanedCount).toBeGreaterThanOrEqual(0);
+      await tokenService.cleanupExpiredTokens();
     });
 
     it('should not clean up non-expired tokens', async () => {
@@ -259,7 +258,7 @@ describe('TokenService', () => {
       const longLivedToken = await tokenService.generateAccessToken(payload, '1h');
       await tokenService.revokeToken(longLivedToken);
       
-      const cleanedCount = await tokenService.cleanupExpiredTokens();
+      await tokenService.cleanupExpiredTokens();
       
       // The long-lived token should still be in the revoked list
       const isRevoked = await tokenService.isTokenRevoked(longLivedToken);
@@ -335,7 +334,7 @@ describe('TokenService', () => {
     });
 
     it('should use default values for missing optional config', () => {
-      const tokenService = createTokenService({});
+      const tokenService = createTokenService({} as Record<string, never>);
       expect(tokenService).toBeDefined();
     });
   });

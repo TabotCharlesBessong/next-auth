@@ -1,6 +1,6 @@
-import jwt from 'jsonwebtoken';
-import crypto from 'crypto';
-import { ITokenService, TokenPayload, AuthError, UnauthorizedError } from './types';
+import * as jwt from 'jsonwebtoken';
+import * as crypto from 'crypto';
+import { ITokenService, TokenPayload, TokenPair, AuthError, UnauthorizedError } from './types';
 import { User } from '../../database/types';
 
 interface RefreshTokenData {
@@ -8,6 +8,12 @@ interface RefreshTokenData {
   tokenId: string;
   expiresAt: Date;
   isRevoked: boolean;
+}
+
+interface TokenGenerationPayload {
+  email?: string;
+  role?: string;
+  [key: string]: unknown;
 }
 
 export class TokenService implements ITokenService {
@@ -52,16 +58,17 @@ export class TokenService implements ITokenService {
       const payload: Omit<TokenPayload, 'iat' | 'exp'> = {
         userId: user.id,
         email: user.email,
-        role: user.role || 'user',
+        role: (user as User & { role?: string }).role || 'user',
       };
 
-      const token = jwt.sign(payload, this.jwtSecret, {
+      const options: jwt.SignOptions = {
         expiresIn: this.accessTokenExpiry,
         issuer: this.issuer,
         audience: this.audience,
         subject: user.id,
         jwtid: crypto.randomUUID(),
-      });
+      };
+      const token = jwt.sign(payload, this.jwtSecret, options);
 
       return token;
     } catch (error) {
@@ -101,18 +108,50 @@ export class TokenService implements ITokenService {
         type: 'refresh',
       };
 
-      const token = jwt.sign(payload, this.jwtSecret, {
+      const options: jwt.SignOptions = {
         expiresIn: this.refreshTokenExpiry,
         issuer: this.issuer,
         audience: this.audience,
         subject: user.id,
         jwtid: tokenId,
-      });
+      };
+      const token = jwt.sign(payload, this.jwtSecret, options);
 
       return token;
     } catch (error) {
       throw new AuthError(
         `Failed to generate refresh token: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        'TOKEN_GENERATION_ERROR',
+        500
+      );
+    }
+  }
+
+  /**
+   * Generate both access and refresh tokens for a user
+   * @param userId - User ID
+   * @param payload - Additional payload data
+   * @returns Promise<TokenPair> - Access and refresh tokens
+   */
+  async generateTokenPair(userId: string, payload: TokenGenerationPayload): Promise<TokenPair> {
+    try {
+      // Create a user-like object for token generation
+      const userForToken = {
+        id: userId,
+        email: payload.email || '',
+        ...payload
+      };
+
+      const accessToken = this.generateAccessToken(userForToken as User);
+      const refreshToken = this.generateRefreshToken(userForToken as User);
+
+      return {
+        accessToken,
+        refreshToken
+      };
+    } catch (error) {
+      throw new AuthError(
+        `Failed to generate token pair: ${error instanceof Error ? error.message : 'Unknown error'}`,
         'TOKEN_GENERATION_ERROR',
         500
       );
@@ -155,7 +194,7 @@ export class TokenService implements ITokenService {
       const decoded = jwt.verify(token, this.jwtSecret, {
         issuer: this.issuer,
         audience: this.audience,
-      }) as any;
+      }) as jwt.JwtPayload & { type: string; tokenId: string };
 
       if (decoded.type !== 'refresh') {
         throw new UnauthorizedError('Invalid token type');
@@ -195,9 +234,9 @@ export class TokenService implements ITokenService {
    */
   async revokeToken(token: string): Promise<void> {
     try {
-      const decoded = jwt.decode(token) as any;
+      const decoded = jwt.decode(token) as jwt.JwtPayload | null;
       
-      if (decoded && decoded.jti) {
+      if (decoded && typeof decoded === 'object' && decoded.jti) {
         const tokenData = this.refreshTokenStore.get(decoded.jti);
         if (tokenData) {
           tokenData.isRevoked = true;
@@ -216,7 +255,7 @@ export class TokenService implements ITokenService {
    */
   async revokeAllUserTokens(userId: string): Promise<void> {
     try {
-      for (const [tokenId, tokenData] of this.refreshTokenStore.entries()) {
+      for (const [tokenId, tokenData] of Array.from(this.refreshTokenStore.entries())) {
         if (tokenData.userId === userId) {
           tokenData.isRevoked = true;
           this.refreshTokenStore.set(tokenId, tokenData);
@@ -239,7 +278,7 @@ export class TokenService implements ITokenService {
       const now = new Date();
       const expiredTokens: string[] = [];
 
-      for (const [tokenId, tokenData] of this.refreshTokenStore.entries()) {
+      for (const [tokenId, tokenData] of Array.from(this.refreshTokenStore.entries())) {
         if (tokenData.expiresAt < now) {
           expiredTokens.push(tokenId);
         }
@@ -260,10 +299,10 @@ export class TokenService implements ITokenService {
    * @param token - JWT token
    * @returns Decoded token payload or null
    */
-  decodeToken(token: string): any | null {
+  decodeToken(token: string): jwt.JwtPayload | string | null {
     try {
       return jwt.decode(token);
-    } catch (error) {
+    } catch (_error) {
       return null;
     }
   }
@@ -275,14 +314,14 @@ export class TokenService implements ITokenService {
    */
   isTokenExpired(token: string): boolean {
     try {
-      const decoded = jwt.decode(token) as any;
-      if (!decoded || !decoded.exp) {
+      const decoded = jwt.decode(token) as jwt.JwtPayload | null;
+      if (!decoded || typeof decoded !== 'object' || !decoded.exp) {
         return true;
       }
       
       const now = Math.floor(Date.now() / 1000);
       return decoded.exp < now;
-    } catch (error) {
+    } catch (_error) {
       return true;
     }
   }
@@ -294,13 +333,13 @@ export class TokenService implements ITokenService {
    */
   getTokenExpiry(token: string): Date | null {
     try {
-      const decoded = jwt.decode(token) as any;
-      if (!decoded || !decoded.exp) {
+      const decoded = jwt.decode(token) as jwt.JwtPayload | null;
+      if (!decoded || typeof decoded !== 'object' || !decoded.exp) {
         return null;
       }
       
       return new Date(decoded.exp * 1000);
-    } catch (error) {
+    } catch (_error) {
       return null;
     }
   }
@@ -357,7 +396,7 @@ export class TokenService implements ITokenService {
     let revokedTokens = 0;
     let expiredTokens = 0;
 
-    for (const tokenData of this.refreshTokenStore.values()) {
+    for (const tokenData of Array.from(this.refreshTokenStore.values())) {
       if (tokenData.isRevoked) {
         revokedTokens++;
       } else if (tokenData.expiresAt < now) {
