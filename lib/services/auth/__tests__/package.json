@@ -42,23 +42,6 @@
     "jsonwebtoken": "^9.0.2",
     "nodemailer": "^6.9.7"
   },
-  "jest": {
-    "projects": [
-      {
-        "displayName": "auth-services",
-        "testMatch": ["<rootDir>/**/*.test.ts"],
-        "preset": "ts-jest",
-        "testEnvironment": "node",
-        "setupFilesAfterEnv": ["<rootDir>/jest.setup.js"],
-        "collectCoverageFrom": [
-          "../**/*.ts",
-          "!../**/*.d.ts",
-          "!../**/*.test.ts",
-          "!../**/__tests__/**"
-        ]
-      }
-    ]
-  },
   "engines": {
     "node": ">=18.0.0"
   },

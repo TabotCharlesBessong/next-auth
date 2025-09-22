@@ -65,7 +65,7 @@ export class TokenService implements ITokenService {
         expiresIn: this.accessTokenExpiry as any,
         issuer: this.issuer,
         audience: this.audience,
-        subject: user.id,
+        subject: String(user.id),
         jwtid: crypto.randomUUID(),
       };
       const token = jwt.sign(payload, this.jwtSecret, options);
@@ -112,7 +112,7 @@ export class TokenService implements ITokenService {
         expiresIn: this.refreshTokenExpiry as any,
         issuer: this.issuer,
         audience: this.audience,
-        subject: user.id,
+        subject: String(user.id),
         jwtid: tokenId,
       };
       const token = jwt.sign(payload, this.jwtSecret, options);

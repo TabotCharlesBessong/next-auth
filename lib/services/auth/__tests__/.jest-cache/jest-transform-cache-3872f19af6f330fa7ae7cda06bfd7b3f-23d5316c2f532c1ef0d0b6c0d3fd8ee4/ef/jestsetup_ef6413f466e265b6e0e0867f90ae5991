@@ -1,0 +1,190 @@
+849b2bb624f21adcde76b2c4b53aad8a
+// Global test setup for authentication services
+
+// Mock console methods to reduce noise in tests
+global.console = {
+  ...console,
+  // Uncomment to suppress console.log in tests
+  // log: jest.fn(),
+  debug: jest.fn(),
+  info: jest.fn(),
+  warn: jest.fn(),
+  error: jest.fn(),
+};
+
+// Mock crypto for Node.js environment
+const crypto = require('crypto');
+
+// Ensure crypto.webcrypto is available for tests
+if (!global.crypto) {
+  global.crypto = {
+    getRandomValues: (arr) => crypto.randomFillSync(arr),
+    randomUUID: () => crypto.randomUUID(),
+    subtle: crypto.webcrypto?.subtle,
+  };
+}
+
+// Mock fetch for OAuth tests
+global.fetch = jest.fn();
+
+// Mock nodemailer for email tests
+jest.mock('nodemailer', () => ({
+  createTransport: jest.fn(() => ({
+    sendMail: jest.fn().mockResolvedValue({
+      messageId: 'test-message-id',
+      response: '250 OK',
+    }),
+    verify: jest.fn().mockResolvedValue(true),
+  })),
+}));
+
+// Mock axios for OAuth provider requests
+jest.mock('axios', () => ({
+  default: {
+    post: jest.fn(),
+    get: jest.fn(),
+    create: jest.fn(() => ({
+      post: jest.fn(),
+      get: jest.fn(),
+    })),
+  },
+  post: jest.fn(),
+  get: jest.fn(),
+}));
+
+// Mock bcrypt for password hashing
+jest.mock('bcrypt', () => ({
+  hash: jest.fn().mockImplementation((password, rounds) => 
+    Promise.resolve(`hashed_${password}_${rounds}`)
+  ),
+  compare: jest.fn().mockImplementation((password, hash) => 
+    Promise.resolve(hash === `hashed_${password}_10`)
+  ),
+  genSalt: jest.fn().mockResolvedValue('test-salt'),
+}));
+
+// Mock jsonwebtoken
+jest.mock('jsonwebtoken', () => ({
+  sign: jest.fn().mockImplementation((payload, secret, options) => {
+    const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
+    const payloadStr = Buffer.from(JSON.stringify({
+      ...payload,
+      iat: Math.floor(Date.now() / 1000),
+      exp: Math.floor(Date.now() / 1000) + (options?.expiresIn === '15m' ? 900 : 604800),
+    })).toString('base64url');
+    const signature = 'mock-signature';
+    return `${header}.${payloadStr}.${signature}`;
+  }),
+  verify: jest.fn().mockImplementation((token) => {
+    try {
+      const [, payload] = token.split('.');
+      const decodedPayload = JSON.parse(Buffer.from(payload, 'base64url').toString());
+      
+      // Check if token is expired
+      if (decodedPayload.exp && decodedPayload.exp < Math.floor(Date.now() / 1000)) {
+        const error = new Error('jwt expired');
+        error.name = 'TokenExpiredError';
+        throw error;
+      }
+      
+      return decodedPayload;
+    } catch (error) {
+      if (error.name === 'TokenExpiredError') {
+        throw error;
+      }
+      const invalidError = new Error('invalid token');
+      invalidError.name = 'JsonWebTokenError';
+      throw invalidError;
+    }
+  }),
+  decode: jest.fn().mockImplementation((token) => {
+    try {
+      const [, payload] = token.split('.');
+      return JSON.parse(Buffer.from(payload, 'base64url').toString());
+    } catch {
+      return null;
+    }
+  }),
+}));
+
+// Global test utilities
+global.testUtils = {
+  // Create a mock user
+  createMockUser: (overrides = {}) => ({
+    id: `user_${Date.now()}_${Math.random()}`,
+    email: 'test@example.com',
+    firstName: 'Test',
+    lastName: 'User',
+    password: 'hashed_password',
+    emailVerified: false,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    ...overrides,
+  }),
+
+  // Create mock tokens
+  createMockTokens: (userId = 'test-user-id') => ({
+    accessToken: `mock.access.token.${userId}`,
+    refreshToken: `mock.refresh.token.${userId}`,
+    expiresIn: 900,
+    tokenType: 'Bearer',
+  }),
+
+  // Create mock OAuth account
+  createMockOAuthAccount: (overrides = {}) => ({
+    id: `oauth_${Date.now()}_${Math.random()}`,
+    provider: 'google',
+    providerId: 'google-user-id',
+    userId: 'test-user-id',
+    accessToken: 'oauth-access-token',
+    refreshToken: 'oauth-refresh-token',
+    expiresAt: new Date(Date.now() + 3600000),
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    ...overrides,
+  }),
+
+  // Wait for async operations
+  waitFor: (ms = 0) => new Promise(resolve => setTimeout(resolve, ms)),
+
+  // Generate random string
+  randomString: (length = 10) => {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    let result = '';
+    for (let i = 0; i < length; i++) {
+      result += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return result;
+  },
+
+  // Generate random email
+  randomEmail: () => `test${Date.now()}${Math.random().toString(36).substr(2, 5)}@example.com`,
+};
+
+// Set up environment variables for tests
+process.env.NODE_ENV = 'test';
+process.env.JWT_SECRET = 'test-jwt-secret-key-for-testing-purposes-only';
+process.env.JWT_REFRESH_SECRET = 'test-refresh-secret-key-for-testing-purposes-only';
+process.env.JWT_EXPIRES_IN = '15m';
+process.env.JWT_REFRESH_EXPIRES_IN = '7d';
+process.env.EMAIL_FROM = 'test@example.com';
+process.env.EMAIL_PROVIDER = 'smtp';
+process.env.SMTP_HOST = 'localhost';
+process.env.SMTP_PORT = '587';
+process.env.SMTP_USER = 'test';
+process.env.SMTP_PASS = 'test';
+process.env.NEXTAUTH_URL = 'http://localhost:3000';
+process.env.CSRF_SECRET = 'test-csrf-secret-key';
+
+// Clean up after each test
+afterEach(() => {
+  jest.clearAllMocks();
+});
+
+// Global error handler for unhandled promise rejections
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+// Increase timeout for integration tests
+jest.setTimeout(10000);
