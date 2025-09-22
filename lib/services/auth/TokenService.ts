@@ -62,7 +62,7 @@ export class TokenService implements ITokenService {
       };
 
       const options: jwt.SignOptions = {
-        expiresIn: this.accessTokenExpiry,
+        expiresIn: this.accessTokenExpiry as any,
         issuer: this.issuer,
         audience: this.audience,
         subject: user.id,
@@ -109,7 +109,7 @@ export class TokenService implements ITokenService {
       };
 
       const options: jwt.SignOptions = {
-        expiresIn: this.refreshTokenExpiry,
+        expiresIn: this.refreshTokenExpiry as any,
         issuer: this.issuer,
         audience: this.audience,
         subject: user.id,
