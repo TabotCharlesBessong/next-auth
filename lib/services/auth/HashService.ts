@@ -1,4 +1,4 @@
-import bcrypt from 'bcryptjs';
+import * as bcrypt from 'bcryptjs';
 import { IHashService } from './types';
 
 export class HashService implements IHashService {
@@ -146,7 +146,7 @@ export class HashService implements IHashService {
       const saltRounds = rounds || this.defaultSaltRounds;
       const currentRounds = bcrypt.getRounds(hash);
       return currentRounds < saltRounds;
-    } catch (error) {
+    } catch (_error) {
       // If we can't determine the rounds, assume rehashing is needed
       return true;
     }

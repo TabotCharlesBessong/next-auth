@@ -396,7 +396,7 @@ export class MongooseConnection implements DatabaseConnection {
       await this.connection.db.admin().ping();
       
       return true;
-    } catch (error) {
+    } catch (_error) {
       return false;
     }
   }

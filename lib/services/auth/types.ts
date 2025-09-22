@@ -7,13 +7,16 @@ export interface RegisterData {
   firstName?: string;
   lastName?: string;
   fullName?: string;
-  [key: string]: any; // For custom fields
+  [key: string]: unknown; // For custom fields
 }
 
 export interface LoginData {
   email: string;
   password: string;
 }
+
+// Alias for consistency
+export type LoginCredentials = LoginData;
 
 export interface AuthResult {
   user: User;
@@ -38,6 +41,13 @@ export interface PasswordResetData {
   email: string;
 }
 
+// Alias for consistency
+export type PasswordResetRequest = PasswordResetData;
+
+export interface EmailVerificationRequest {
+  token: string;
+}
+
 export interface ChangePasswordData {
   userId: string;
   oldPassword: string;
@@ -58,6 +68,71 @@ export interface OAuthUserInfo {
   avatar?: string;
   provider: string;
 }
+
+// Alias for consistency
+export interface OAuthUserData extends OAuthUserInfo {
+  emailVerified?: boolean;
+}
+
+// OAuth Provider type
+export type OAuthProvider = 'google' | 'facebook' | 'github';
+
+// User types
+export type AuthUser = User;
+export type UserProfile = User;
+export type UserRole = 'user' | 'admin' | 'moderator';
+
+// Token types
+export type TokenData = TokenPayload;
+export interface TokenConfig {
+  accessTokenSecret: string;
+  refreshTokenSecret: string;
+  accessTokenExpiry: string;
+  refreshTokenExpiry: string;
+  issuer?: string;
+}
+
+// Email configuration
+export interface EmailConfig {
+  provider: 'smtp' | 'sendgrid' | 'mailgun';
+  smtp?: {
+    host: string;
+    port: number;
+    secure: boolean;
+    auth: {
+      user: string;
+      pass: string;
+    };
+  };
+  sendgrid?: {
+    apiKey: string;
+  };
+  mailgun?: {
+    apiKey: string;
+    domain: string;
+  };
+  from: {
+    name: string;
+    email: string;
+  };
+}
+
+// Hash configuration
+export interface HashConfig {
+  saltRounds: number;
+  pepper?: string;
+}
+
+// Error types
+export type AuthErrorCode = 
+  | 'INVALID_CREDENTIALS'
+  | 'USER_EXISTS'
+  | 'USER_NOT_FOUND'
+  | 'EMAIL_NOT_VERIFIED'
+  | 'ACCOUNT_LOCKED'
+  | 'TOKEN_EXPIRED'
+  | 'INVALID_TOKEN'
+  | 'RATE_LIMIT_EXCEEDED';
 
 export interface SocialAccount {
   id: string;
@@ -80,9 +155,9 @@ export interface OAuthConfig {
   scope?: string[];
 }
 
-export interface GoogleConfig extends OAuthConfig {}
-export interface FacebookConfig extends OAuthConfig {}
-export interface GitHubConfig extends OAuthConfig {}
+export type GoogleConfig = OAuthConfig;
+export type FacebookConfig = OAuthConfig;
+export type GitHubConfig = OAuthConfig;
 
 // Service Interfaces
 export interface IAuthService {
@@ -91,8 +166,9 @@ export interface IAuthService {
   logout(token: string): Promise<void>;
   refreshToken(refreshToken: string): Promise<TokenPair>;
   verifyEmail(token: string): Promise<boolean>;
-  resetPassword(email: string): Promise<void>;
-  changePassword(data: ChangePasswordData): Promise<void>;
+  requestPasswordReset(request: PasswordResetRequest): Promise<void>;
+  resetPassword(token: string, newPassword: string): Promise<void>;
+  changePassword(userId: string, data: ChangePasswordData): Promise<void>;
   validateToken(token: string): Promise<TokenPayload>;
 }
 
@@ -106,6 +182,7 @@ export interface IOAuthService {
 export interface ITokenService {
   generateAccessToken(user: User): string;
   generateRefreshToken(user: User): string;
+  generateTokenPair(userId: string, payload: Partial<TokenPayload>): Promise<TokenPair>;
   verifyToken(token: string): TokenPayload;
   revokeToken(token: string): Promise<void>;
   cleanupExpiredTokens(): Promise<void>;
@@ -121,12 +198,23 @@ export interface IEmailService {
   sendVerificationEmail(email: string, token: string): Promise<void>;
   sendPasswordResetEmail(email: string, token: string): Promise<void>;
   sendWelcomeEmail(email: string, name: string): Promise<void>;
+  verifyEmailToken(token: string, type: string): Promise<{ email: string }>;
+}
+
+export interface IUserRepository {
+  create(userData: RegisterData): Promise<User>;
+  findById(id: string): Promise<User | null>;
+  findByEmail(email: string): Promise<User | null>;
+  update(id: string, data: Partial<User>): Promise<User | null>;
+  delete(id: string): Promise<void>;
+  findByProvider(provider: string, providerId: string): Promise<User | null>;
+  findByOAuthId(provider: OAuthProvider, oauthId: string): Promise<User | null>;
 }
 
 // OAuth Provider Interface
 export interface IOAuthProvider {
   getAuthUrl(state: string): string;
-  exchangeCodeForTokens(code: string): Promise<any>;
+  exchangeCodeForTokens(code: string): Promise<unknown>;
   getUserInfo(accessToken: string): Promise<OAuthUserInfo>;
 }
 
