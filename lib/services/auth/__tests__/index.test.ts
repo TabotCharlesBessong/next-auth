@@ -432,7 +432,12 @@ describe('Auth Services Integration', () => {
     });
 
     it('should create TokenService independently', () => {
-      const tokenService = createTokenService();
+      const tokenService = createTokenService({
+        jwtSecret: 'test-secret-that-is-at-least-32-characters-long-for-jwt',
+        accessTokenExpiry: '15m',
+        refreshTokenExpiry: '7d',
+        issuer: 'test-issuer'
+      });
       
       expect(tokenService).toBeInstanceOf(TokenService);
     });
@@ -488,7 +493,12 @@ describe('Auth Services Integration', () => {
     let securityService: SecurityService;
 
     beforeEach(() => {
-      tokenService = createTokenService();
+      tokenService = createTokenService({
+        jwtSecret: 'test-secret-that-is-at-least-32-characters-long-for-jwt',
+        accessTokenExpiry: '15m',
+        refreshTokenExpiry: '7d',
+        issuer: 'test-issuer'
+      });
       hashService = createHashService();
       
       authService = createAuthService({
@@ -718,10 +728,8 @@ describe('Auth Services Integration', () => {
       })).toThrow();
     });
 
-    it('should handle missing environment variables', () => {
-      delete process.env.JWT_SECRET;
-      
-      expect(() => createTokenService())
+    it('should handle missing JWT secret in config', () => {
+      expect(() => createTokenService({} as any))
         .toThrow();
     });
 
@@ -743,7 +751,12 @@ describe('Auth Services Integration', () => {
     let tokenService: TokenService;
 
     beforeEach(() => {
-      tokenService = createTokenService();
+      tokenService = createTokenService({
+        jwtSecret: 'test-secret-that-is-at-least-32-characters-long-for-jwt',
+        accessTokenExpiry: '15m',
+        refreshTokenExpiry: '7d',
+        issuer: 'test-issuer'
+      });
       
       authService = createAuthService({
         userRepository: createMockUserRepository(),

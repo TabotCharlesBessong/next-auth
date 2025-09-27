@@ -9,7 +9,8 @@ import {
   AuthUser, 
   AuthResult,
   AuthError,
-  SocialAccount
+  SocialAccount,
+  RegisterData
 } from './types';
 import { User } from '../../database/types';
 import { oauthCallbackSchema } from './validation';
@@ -257,7 +258,7 @@ export class OAuthService implements IOAuthService {
       }
 
       // Update user with OAuth information
-      const oauthAccounts = user.oauthAccounts || {};
+      const oauthAccounts: Record<string, any> = user.oauthAccounts || {};
       oauthAccounts[oauthProvider] = {
         id: oauthUserData.id,
         email: oauthUserData.email,
@@ -310,13 +311,17 @@ export class OAuthService implements IOAuthService {
         throw new AuthError('User not found', 'USER_NOT_FOUND', 404);
       }
 
-      if (!user.oauthAccounts || !user.oauthAccounts[provider]) {
+      // Get user's OAuth accounts
+      const userOAuthAccounts = await this.userRepository.getUserOAuthAccounts(userId);
+      const targetAccount = userOAuthAccounts.find(account => account.provider === provider);
+      
+      if (!targetAccount) {
         throw new AuthError('OAuth account not linked', 'OAUTH_ACCOUNT_NOT_LINKED', 400);
       }
 
       // Check if user has a password or other OAuth accounts
       const hasPassword = !!user.password;
-      const otherOAuthAccounts = Object.keys(user.oauthAccounts).filter(p => p !== provider);
+      const otherOAuthAccounts = userOAuthAccounts.filter(account => account.provider !== provider);
       
       if (!hasPassword && otherOAuthAccounts.length === 0) {
         throw new AuthError(
@@ -327,12 +332,7 @@ export class OAuthService implements IOAuthService {
       }
 
       // Remove OAuth account
-      const oauthAccounts = { ...user.oauthAccounts };
-      delete oauthAccounts[provider];
-
-      await this.userRepository.update(userId, {
-        oauthAccounts,
-      });
+      await this.userRepository.deleteOAuthAccount(targetAccount.id);
 
       console.log(`OAuth account ${provider} unlinked from user ${userId}`);
     } catch (error) {
@@ -451,29 +451,32 @@ export class OAuthService implements IOAuthService {
     switch (provider) {
       case 'google':
         return {
-          id: userData.id,
-          email: userData.email,
-          name: userData.name,
+          id: userData.id || '',
+          email: userData.email || '',
+          name: userData.name || '',
           avatar: userData.picture,
           emailVerified: userData.verified_email || false,
+          provider,
         };
 
       case 'facebook':
         return {
-          id: userData.id,
-          email: userData.email,
-          name: userData.name,
-          avatar: userData.picture?.data?.url,
+          id: userData.id || '',
+          email: userData.email || '',
+          name: userData.name || '',
+          avatar: userData.picture,
           emailVerified: true, // Facebook emails are typically verified
+          provider,
         };
 
       case 'github':
         return {
-          id: userData.id.toString(),
-          email: userData.email,
-          name: userData.name || userData.login,
+          id: userData.id?.toString() || '',
+          email: userData.email || '',
+          name: userData.name || userData.login || '',
           avatar: userData.avatar_url,
           emailVerified: true, // GitHub emails are typically verified
+          provider,
         };
 
       default:
@@ -494,7 +497,7 @@ export class OAuthService implements IOAuthService {
 
       if (user) {
         // Update OAuth account information
-        const oauthAccounts = user.oauthAccounts || {};
+        const oauthAccounts: Record<string, any> = user.oauthAccounts || {};
         oauthAccounts[provider] = {
           id: oauthUserData.id,
           email: oauthUserData.email,
@@ -506,9 +509,9 @@ export class OAuthService implements IOAuthService {
         user = await this.userRepository.update(user.id, {
           oauthAccounts,
           metadata: {
-            ...user.metadata,
+            ...(user.metadata as Record<string, unknown> || {}),
             lastLogin: new Date(),
-            loginCount: (user.metadata?.loginCount || 0) + 1,
+            loginCount: ((user.metadata as Record<string, unknown>)?.loginCount as number || 0) + 1,
           },
         });
       } else {
@@ -517,7 +520,7 @@ export class OAuthService implements IOAuthService {
 
         if (existingUser) {
           // Link OAuth account to existing user
-          const oauthAccounts = existingUser.oauthAccounts || {};
+          const oauthAccounts: Record<string, any> = existingUser.oauthAccounts || {};
           oauthAccounts[provider] = {
             id: oauthUserData.id,
             email: oauthUserData.email,
@@ -530,9 +533,9 @@ export class OAuthService implements IOAuthService {
             oauthAccounts,
             emailVerified: oauthUserData.emailVerified || existingUser.emailVerified,
             metadata: {
-              ...existingUser.metadata,
+              ...(existingUser.metadata as Record<string, unknown> || {}),
               lastLogin: new Date(),
-              loginCount: (existingUser.metadata?.loginCount || 0) + 1,
+              loginCount: ((existingUser.metadata as Record<string, unknown>)?.loginCount as number || 0) + 1,
             },
           });
         } else {
@@ -569,11 +572,15 @@ export class OAuthService implements IOAuthService {
         }
       }
 
+      // Ensure user exists before proceeding
+      if (!user) {
+        throw new AuthError('Failed to create or update user', 'USER_CREATION_ERROR', 500);
+      }
+
       // Generate tokens
       const tokens = await this.tokenService.generateTokenPair(user.id, {
         email: user.email,
-        role: user.role,
-        emailVerified: user.emailVerified,
+        role: user.role as string,
       });
 
       return {

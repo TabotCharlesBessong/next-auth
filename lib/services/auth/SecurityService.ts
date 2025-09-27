@@ -1,4 +1,4 @@
-import crypto from 'crypto';
+import * as crypto from 'crypto';
 import { AuthError } from './types';
 
 interface RateLimitConfig {
@@ -469,7 +469,7 @@ export class SecurityService {
 
     // Clean up expired CSRF tokens
     let expiredCSRFTokens = 0;
-    for (const [token, tokenData] of this.csrfTokenStore.entries()) {
+    for (const [token, tokenData] of Array.from(this.csrfTokenStore.entries())) {
       if (tokenData.expiresAt < now) {
         this.csrfTokenStore.delete(token);
         expiredCSRFTokens++;
@@ -478,7 +478,7 @@ export class SecurityService {
 
     // Clean up expired rate limit entries
     let expiredRateLimits = 0;
-    for (const [key, entry] of this.rateLimitStore.entries()) {
+    for (const [key, entry] of Array.from(this.rateLimitStore.entries())) {
       if (currentTime >= entry.resetTime) {
         this.rateLimitStore.delete(key);
         expiredRateLimits++;
@@ -557,7 +557,7 @@ export const createDevelopmentSecurityConfig = (): Partial<SecurityConfig> => ({
   session: {
     secure: false,
   },
-});
+} as any);
 
 export const createProductionSecurityConfig = (): Partial<SecurityConfig> => ({
   csrf: {
@@ -580,7 +580,7 @@ export const createProductionSecurityConfig = (): Partial<SecurityConfig> => ({
     secure: true,
     sameSite: 'strict',
   },
-});
+} as any);
 
 // Middleware helper functions
 interface MiddlewareRequest {
@@ -597,7 +597,7 @@ interface MiddlewareResponse {
   status: (code: number) => { json: (data: Record<string, unknown>) => void };
 }
 
-type NextFunction = () => void;
+type NextFunction = (error?: any) => void;
 
 export const createCSRFMiddleware = (securityService: SecurityService) => {
   return (req: MiddlewareRequest, res: MiddlewareResponse, next: NextFunction) => {

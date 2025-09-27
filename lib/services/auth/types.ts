@@ -209,6 +209,12 @@ export interface IUserRepository {
   delete(id: string): Promise<void>;
   findByProvider(provider: string, providerId: string): Promise<User | null>;
   findByOAuthId(provider: OAuthProvider, oauthId: string): Promise<User | null>;
+  
+  // OAuth account management methods
+  createOAuthAccount(accountData: { userId: string; provider: string; providerId: string; email?: string; name?: string; avatar?: string; accessToken?: string; refreshToken?: string }): Promise<SocialAccount>;
+  findOAuthAccount(provider: string, providerId: string): Promise<SocialAccount | null>;
+  getUserOAuthAccounts(userId: string): Promise<SocialAccount[]>;
+  deleteOAuthAccount(id: string): Promise<boolean>;
 }
 
 // OAuth Provider Interface

@@ -124,8 +124,7 @@ export class AuthService implements IAuthService {
       // Generate tokens
       const tokens = await this.tokenService.generateTokenPair(newUser.id, {
         email: newUser.email,
-        role: newUser.role,
-        emailVerified: newUser.emailVerified,
+        role: typeof newUser.role === 'string' ? newUser.role : undefined,
       });
 
       return {
@@ -211,8 +210,7 @@ export class AuthService implements IAuthService {
       // Generate tokens
       const tokens = await this.tokenService.generateTokenPair(user.id, {
         email: user.email,
-        role: user.role,
-        emailVerified: user.emailVerified,
+        role: typeof user.role === 'string' ? user.role : undefined,
       });
 
       return {
@@ -276,8 +274,7 @@ export class AuthService implements IAuthService {
       // Generate new token pair
       const tokens = await this.tokenService.generateTokenPair(user.id, {
         email: user.email,
-        role: user.role,
-        emailVerified: user.emailVerified,
+        role: typeof user.role === 'string' ? user.role : undefined,
       });
 
       // Revoke old refresh token
@@ -514,7 +511,11 @@ export class AuthService implements IAuthService {
         phone: validatedData.phone || user.phone,
       });
 
-      return this.sanitizeUser(updatedUser);
+      if (!updatedUser) {
+        throw new AuthError('Failed to update user profile', 'PROFILE_UPDATE_ERROR', 500);
+      }
+
+      return this.sanitizeUser(updatedUser!);
     } catch (error) {
       if (error instanceof AuthError) {
         throw error;

@@ -62,10 +62,10 @@ export class TokenService implements ITokenService {
       };
 
       const options: jwt.SignOptions = {
-        expiresIn: this.accessTokenExpiry,
+        expiresIn: this.accessTokenExpiry as any,
         issuer: this.issuer,
         audience: this.audience,
-        subject: user.id,
+        subject: String(user.id),
         jwtid: crypto.randomUUID(),
       };
       const token = jwt.sign(payload, this.jwtSecret, options);
@@ -109,10 +109,10 @@ export class TokenService implements ITokenService {
       };
 
       const options: jwt.SignOptions = {
-        expiresIn: this.refreshTokenExpiry,
+        expiresIn: this.refreshTokenExpiry as any,
         issuer: this.issuer,
         audience: this.audience,
-        subject: user.id,
+        subject: String(user.id),
         jwtid: tokenId,
       };
       const token = jwt.sign(payload, this.jwtSecret, options);
