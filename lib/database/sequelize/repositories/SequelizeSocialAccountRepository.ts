@@ -1,17 +1,17 @@
 import { Op, Transaction, WhereOptions } from 'sequelize';
-import { AbstractBaseRepository } from '../../base/BaseRepository';
-import { SocialAccount, SocialAccountRepository, QueryOptions, WhereClause, UpdateOptions, DeleteOptions, ValidationError } from '../../types';
+import { BaseRepository, SocialAccount, SocialAccountRepository, QueryOptions, WhereClause, UpdateOptions, DeleteOptions, ValidationError } from '../../types';
 import { SocialAccountModel } from '../models';
+import { AbstractBaseRepository } from '../../base/AbstractBaseRepository';
 
 /**
  * Sequelize implementation of SocialAccountRepository
  */
 export class SequelizeSocialAccountRepository extends AbstractBaseRepository<SocialAccount> implements SocialAccountRepository {
-  private socialAccountModel: typeof SocialAccountModel;
+  protected model: typeof SocialAccountModel;
 
   constructor(socialAccountModel: typeof SocialAccountModel) {
-    super('social_accounts', socialAccountModel.sequelize);
-    this.socialAccountModel = socialAccountModel;
+    super(socialAccountModel);
+    this.model = socialAccountModel;
   }
 
   /**
@@ -40,7 +40,7 @@ export class SequelizeSocialAccountRepository extends AbstractBaseRepository<Soc
         updatedAt: now,
       };
 
-      const socialAccount = await this.socialAccountModel.create(socialAccountData as any);
+      const socialAccount = await this.model.create(socialAccountData as any);
       return this.mapRowToEntity(socialAccount.toJSON() as unknown as Record<string, unknown>);
     } catch (error) {
       this.handleDatabaseError(error, 'create social account');
@@ -56,7 +56,7 @@ export class SequelizeSocialAccountRepository extends AbstractBaseRepository<Soc
         return null;
       }
 
-      const socialAccount = await this.socialAccountModel.findByPk(id, {
+      const socialAccount = await this.model.findByPk(id, {
         attributes: this.buildSelectFields(),
         include: this.buildIncludeClause(options),
       });
@@ -76,7 +76,7 @@ export class SequelizeSocialAccountRepository extends AbstractBaseRepository<Soc
         return null;
       }
 
-      const socialAccount = await this.socialAccountModel.findOne({
+      const socialAccount = await this.model.findOne({
         where: { 
           provider,
           providerId,
@@ -105,7 +105,7 @@ export class SequelizeSocialAccountRepository extends AbstractBaseRepository<Soc
 
       const { limit, offset } = this.buildLimitClause(options);
       
-      const socialAccounts = await this.socialAccountModel.findAll({
+      const socialAccounts = await this.model.findAll({
         where: {
           userId,
           isActive: true
@@ -132,7 +132,7 @@ export class SequelizeSocialAccountRepository extends AbstractBaseRepository<Soc
         return null;
       }
 
-      const socialAccount = await this.socialAccountModel.findOne({
+      const socialAccount = await this.model.findOne({
         where: {
           userId,
           provider,
@@ -155,7 +155,7 @@ export class SequelizeSocialAccountRepository extends AbstractBaseRepository<Soc
    */
   async findOne(where: WhereClause, options?: QueryOptions): Promise<SocialAccount | null> {
     try {
-      const socialAccount = await this.socialAccountModel.findOne({
+      const socialAccount = await this.model.findOne({
         where: this.buildWhereClause(where),
         attributes: this.buildSelectFields(),
         include: this.buildIncludeClause(options),
@@ -175,7 +175,7 @@ export class SequelizeSocialAccountRepository extends AbstractBaseRepository<Soc
     try {
       const { limit, offset } = this.buildLimitClause(options);
       
-      const socialAccounts = await this.socialAccountModel.findAll({
+      const socialAccounts = await this.model.findAll({
         where: where ? this.buildWhereClause(where) : undefined,
         attributes: this.buildSelectFields(),
         include: this.buildIncludeClause(options),
@@ -210,7 +210,7 @@ export class SequelizeSocialAccountRepository extends AbstractBaseRepository<Soc
         updatedAt: this.getCurrentTimestamp(),
       };
 
-      const [affectedRows] = await this.socialAccountModel.update(updateData, {
+      const [affectedRows] = await this.model.update(updateData, {
         where: { id },
         returning: true,
       });
@@ -236,7 +236,7 @@ export class SequelizeSocialAccountRepository extends AbstractBaseRepository<Soc
         updatedAt: this.getCurrentTimestamp(),
       };
 
-      const [affectedRows] = await this.socialAccountModel.update(updateData, {
+      const [affectedRows] = await this.model.update(updateData, {
         where: this.buildWhereClause(options.where),
       });
 
@@ -261,7 +261,7 @@ export class SequelizeSocialAccountRepository extends AbstractBaseRepository<Soc
         return result !== null;
       } else {
         // Hard delete
-        const affectedRows = await this.socialAccountModel.destroy({
+        const affectedRows = await this.model.destroy({
           where: { id },
         });
         return affectedRows > 0;
@@ -281,7 +281,7 @@ export class SequelizeSocialAccountRepository extends AbstractBaseRepository<Soc
         return await this.updateMany({ isActive: false }, options);
       } else {
         // Hard delete
-        const affectedRows = await this.socialAccountModel.destroy({
+        const affectedRows = await this.model.destroy({
           where: this.buildWhereClause(options.where),
         });
         return affectedRows;
@@ -296,7 +296,7 @@ export class SequelizeSocialAccountRepository extends AbstractBaseRepository<Soc
    */
   async count(where?: WhereClause): Promise<number> {
     try {
-      return await this.socialAccountModel.count({
+      return await this.model.count({
         where: where ? this.buildWhereClause(where) : undefined,
       });
     } catch (error) {
@@ -309,7 +309,7 @@ export class SequelizeSocialAccountRepository extends AbstractBaseRepository<Soc
    */
   async exists(where: WhereClause): Promise<boolean> {
     try {
-      const count = await this.socialAccountModel.count({
+      const count = await this.model.count({
         where: this.buildWhereClause(where),
       });
       return count > 0;
@@ -351,7 +351,7 @@ export class SequelizeSocialAccountRepository extends AbstractBaseRepository<Soc
    */
   async unlinkFromUser(userId: string, provider: string): Promise<boolean> {
     try {
-      const socialAccount = await this.socialAccountModel.findOne({
+      const socialAccount = await this.model.findOne({
         where: {
           userId,
           provider,
@@ -404,7 +404,7 @@ export class SequelizeSocialAccountRepository extends AbstractBaseRepository<Soc
 
       const { limit, offset } = this.buildLimitClause(options);
       
-      const socialAccounts = await this.socialAccountModel.findAll({
+      const socialAccounts = await this.model.findAll({
         where: {
           provider,
           isActive: true
@@ -427,7 +427,7 @@ export class SequelizeSocialAccountRepository extends AbstractBaseRepository<Soc
    */
   async findExpiredTokens(): Promise<SocialAccount[]> {
     try {
-      const socialAccounts = await this.socialAccountModel.findAll({
+      const socialAccounts = await this.model.findAll({
         where: {
           isActive: true,
           tokenExpiresAt: {
@@ -455,10 +455,10 @@ export class SequelizeSocialAccountRepository extends AbstractBaseRepository<Soc
    */
   async getProviderStats(): Promise<Record<string, number>> {
     try {
-      const results = await this.socialAccountModel.findAll({
+      const results = await this.model.findAll({
         attributes: [
           'provider',
-          [this.socialAccountModel.sequelize!.fn('COUNT', this.socialAccountModel.sequelize!.col('id')), 'count']
+          [(this.model as typeof SocialAccountModel).sequelize!.fn('COUNT', (this.model as typeof SocialAccountModel).sequelize!.col('id')), 'count']
         ],
         where: {
           isActive: true
@@ -534,7 +534,7 @@ export class SequelizeSocialAccountRepository extends AbstractBaseRepository<Soc
    * Executes a transaction
    */
   protected async executeTransaction<R>(callback: (trx: import('sequelize').Transaction | import('mongoose').ClientSession) => Promise<R>): Promise<R> {
-    return await this.socialAccountModel.sequelize!.transaction(callback);
+    return await (this.model as typeof SocialAccountModel).sequelize!.transaction(callback);
   }
 
   /**
@@ -563,5 +563,70 @@ export class SequelizeSocialAccountRepository extends AbstractBaseRepository<Soc
     }
     
     return includes;
+  }
+
+  protected validateRequiredFields(data: Partial<SocialAccount>, requiredFields: string[]): void {
+    for (const field of requiredFields) {
+      if (!(field in data) || data[field as keyof SocialAccount] === undefined) {
+        throw new ValidationError(`Missing required field: ${field}`);
+      }
+    }
+  }
+
+  protected sanitizeData(data: Partial<SocialAccount>, removeNull = false): Partial<SocialAccount> {
+    const sanitized: Partial<SocialAccount> = {};
+    for (const [key, value] of Object.entries(data)) {
+      if (value !== undefined && (!removeNull || value !== null)) {
+        (sanitized as Record<string, unknown>)[key] = value;
+      }
+    }
+    return sanitized;
+  }
+
+  protected generateId(): string {
+    return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+  }
+
+  protected getCurrentTimestamp(): Date {
+    return new Date();
+  }
+
+  protected validateUUID(id: string): boolean {
+    // Basic UUID validation, consider a library like uuid for robust validation
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[4][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    return uuidRegex.test(id);
+  }
+
+  protected buildOrderClause(options?: QueryOptions): string {
+    if (!options?.orderBy) {
+      return 'createdAt DESC';
+    }
+    const direction = options.orderDirection || 'ASC';
+    return `${options.orderBy} ${direction}`;
+  }
+
+  protected buildLimitClause(options?: QueryOptions): { limit?: number; offset?: number } {
+    return {
+      limit: options?.limit,
+      offset: options?.offset
+    };
+  }
+
+  protected mapRowToEntity(row: Record<string, unknown>): SocialAccount {
+    // Assuming row keys are already camelCase from Sequelize, or handle conversion if needed
+    return row as SocialAccount;
+  }
+
+  protected handleDatabaseError(error: unknown, operation: string): never {
+    console.error(`Database error during ${operation}:`, error);
+    throw new Error(`Database error: ${operation}`);
+  }
+
+  protected async ensureExists(id: string, entityName: string): Promise<SocialAccount> {
+    const entity = await this.findById(id);
+    if (!entity) {
+      throw new Error(`${entityName} with id ${id} not found`);
+    }
+    return entity;
   }
 }

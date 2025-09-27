@@ -25,21 +25,23 @@ export class SequelizeConnection implements DatabaseConnection {
         database: this.config.database,
         username: this.config.username,
         password: this.config.password,
-        logging: process.env.NODE_ENV === 'development' ? console.log : false,
+        logging: this.config.logging ? console.log : false,
         pool: {
-          max: 10,
-          min: 0,
-          acquire: 30000,
-          idle: 10000
+          max: this.config.pool?.max || 10,
+          min: this.config.pool?.min || 0,
+          acquire: this.config.pool?.acquire || 30000,
+          idle: this.config.pool?.idle || 10000
         },
         dialectOptions: {
-          // SSL configuration for production
-          ...(process.env.NODE_ENV === 'production' && {
+          // SSL configuration
+          ...(this.config.ssl && {
             ssl: {
               require: true,
               rejectUnauthorized: false
             }
-          })
+          }),
+          // Additional options specific to dialect
+          ...(this.config as any).dialectOptions || {},
         },
         // Merge any additional options
         ...this.config.options
@@ -215,7 +217,7 @@ export class SequelizeConnection implements DatabaseConnection {
     try {
       const [results] = await this.sequelize.query(
         // @ts-ignore
-        this.config.type === 'postgresql'
+        this.config.provider === DatabaseProvider.POSTGRESQL
           ? `SELECT 
               schemaname,
               tablename,
@@ -238,7 +240,7 @@ export class SequelizeConnection implements DatabaseConnection {
 
       return {
         // @ts-ignore
-        type: this.config.type,
+        type: this.config.provider,
         database: this.config.database,
         connected: this.isConnectedFlag,
         stats: results
