@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
 import { DatabaseFactory } from '../DatabaseFactory';
-import { DatabaseProvider, DatabaseConfig, DatabaseConnection } from '../types';
+import { DatabaseProvider, DatabaseConfig } from '../types';
 import { DatabasePresets } from '../config/database.config';
 
 // Mock the database connections
