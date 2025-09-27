@@ -67,6 +67,16 @@ export interface Session {
   updatedAt: Date;
 }
 
+export interface RefreshToken {
+  id: string;
+  userId: string;
+  token: string;
+  expiresAt: Date;
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export interface SocialAccount {
   id: string;
   userId: string;
@@ -107,11 +117,13 @@ export interface EmailVerification {
   expiresAt: Date;
   isUsed: boolean;
   isVerified: boolean;
+  type: 'verification' | 'password-reset';
   verifiedAt?: Date;
   attempts: number;
   ipAddress?: string;
   userAgent?: string;
   createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface AuditLog {
@@ -225,6 +237,14 @@ export interface SessionRepository extends BaseRepository<Session> {
   cleanupExpiredSessions(): Promise<number>;
 }
 
+export interface RefreshTokenRepository extends BaseRepository<RefreshToken> {
+  findByTokenId(tokenId: string): Promise<RefreshToken | null>;
+  findByUserId(userId: string, options?: QueryOptions): Promise<RefreshToken[]>;
+  revokeToken(tokenId: string): Promise<boolean>;
+  revokeAllUserTokens(userId: string): Promise<number>;
+  cleanupExpiredTokens(): Promise<number>;
+}
+
 export interface SocialAccountRepository extends BaseRepository<SocialAccount> {
   findByProvider(provider: string, providerId: string): Promise<SocialAccount | null>;
   findByUserId(userId: string): Promise<SocialAccount[]>;
@@ -239,8 +259,7 @@ export interface PasswordResetRepository extends BaseRepository<PasswordReset> {
 }
 
 export interface EmailVerificationRepository extends BaseRepository<EmailVerification> {
-  findByToken(token: string): Promise<EmailVerification | null>;
-  findActiveByUserId(userId: string): Promise<EmailVerification | null>;
+  findByToken(token: string, type: 'verification' | 'password-reset'): Promise<EmailVerification | null>;
   markAsUsed(id: string): Promise<void>;
   cleanupExpiredTokens(): Promise<number>;
 }
@@ -250,6 +269,12 @@ export interface AuditLogRepository extends BaseRepository<AuditLog> {
   findByAction(action: string, options?: QueryOptions): Promise<AuditLog[]>;
   findByResource(resource: string, resourceId?: string, options?: QueryOptions): Promise<AuditLog[]>;
   cleanupOldLogs(daysToKeep: number): Promise<number>;
+}
+
+export interface EmailTokenRepository extends BaseRepository<EmailVerification> {
+  findByToken(token: string, type: 'verification' | 'password-reset'): Promise<EmailVerification | null>;
+  markAsUsed(id: string): Promise<void>;
+  cleanupExpiredTokens(): Promise<number>;
 }
 
 // Database connection interface
@@ -275,6 +300,8 @@ export interface DatabaseService {
   passwordResets: PasswordResetRepository;
   emailVerifications: EmailVerificationRepository;
   auditLogs: AuditLogRepository;
+  refreshTokens: RefreshTokenRepository; // Added RefreshTokenRepository
+  emailTokens: EmailTokenRepository;
 }
 
 // Migration interface
