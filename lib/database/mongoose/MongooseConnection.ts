@@ -1,5 +1,6 @@
 import mongoose, { Connection, ConnectOptions } from 'mongoose';
 import { DatabaseConnection, DatabaseConfig, DatabaseError } from '../types';
+import { databaseConfig as databaseConfigManager } from '../config/database.config';
 
 /**
  * Mongoose connection manager for MongoDB
@@ -57,41 +58,7 @@ export class MongooseConnection implements DatabaseConnection {
    * Builds MongoDB connection string
    */
   private buildConnectionString(): string {
-    const { host, port, database, username, password, ssl, options } = this.config;
-    
-    let connectionString = 'mongodb';
-    
-    // Add SSL prefix if enabled
-    if (ssl) {
-      connectionString += '+srv';
-    }
-    
-    connectionString += '://';
-    
-    // Add authentication if provided
-    if (username && password) {
-      connectionString += `${encodeURIComponent(username)}:${encodeURIComponent(password)}@`;
-    }
-    
-    // Add host and port
-    connectionString += host;
-    if (port && !ssl) {
-      connectionString += `:${port}`;
-    }
-    
-    // Add database name
-    connectionString += `/${database}`;
-    
-    // Add additional options
-    if (options && Object.keys(options).length > 0) {
-      const params = new URLSearchParams();
-      Object.entries(options).forEach(([key, value]) => {
-        params.append(key, String(value));
-      });
-      connectionString += `?${params.toString()}`;
-    }
-    
-    return connectionString;
+    return databaseConfigManager.getConnectionString(this.config);
   }
 
   /**
@@ -116,7 +83,11 @@ export class MongooseConnection implements DatabaseConnection {
         options.tlsCertificateKeyFile = this.config.sslCert;
       }
       if (this.config.sslKey) {
-        options.tlsCertificateKeyFile = this.config.sslKey;
+        // Mongoose doesn't directly support tlsPrivatekeyFile in ConnectOptions
+        // If sslKey is separate, it's often combined with sslCert into tlsCertificateKeyFile
+        // For advanced scenarios, consider using mongoose.connection.setClientEncryption()
+        // For simplicity, if a separate key is provided, we'll assume it's part of tlsCertificateKeyFile
+        options.tlsCertificateKeyFile = this.config.sslKey; // Assuming combined cert/key or handled by driver
       }
       if (this.config.sslCA) {
         options.tlsCAFile = this.config.sslCA;

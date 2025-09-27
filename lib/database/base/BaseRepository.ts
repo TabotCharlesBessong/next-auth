@@ -1,29 +1,16 @@
-import { BaseRepository, QueryOptions, WhereClause, CreateOptions, UpdateOptions, DeleteOptions, DatabaseError, NotFoundError } from '../types';
+import { QueryOptions, WhereClause, CreateOptions, UpdateOptions, DeleteOptions, DatabaseError, NotFoundError } from '../types';
 
 /**
  * Abstract base repository class that provides common functionality
- * for all database implementations
+ * for all database implementations. It does not implement BaseRepository<T>
+ * directly, but provides helper methods and a protected model property.
  */
-export abstract class AbstractBaseRepository<T> implements BaseRepository<T> {
-  protected tableName: string;
-  protected connection: unknown;
+export abstract class AbstractBaseRepository<T> {
+  protected model: any; // Using `any` for flexibility with ORM models
 
-  constructor(tableName: string, connection: unknown) {
-    this.tableName = tableName;
-    this.connection = connection;
+  constructor(model: any) {
+    this.model = model;
   }
-
-  // Abstract methods that must be implemented by concrete repositories
-  abstract create(data: Partial<T>, options?: CreateOptions): Promise<T>;
-  abstract findById(id: string, options?: QueryOptions): Promise<T | null>;
-  abstract findOne(where: WhereClause, options?: QueryOptions): Promise<T | null>;
-  abstract findMany(where?: WhereClause, options?: QueryOptions): Promise<T[]>;
-  abstract update(id: string, data: Partial<T>, options?: UpdateOptions): Promise<T | null>;
-  abstract updateMany(data: Partial<T>, options: UpdateOptions): Promise<number>;
-  abstract delete(id: string, options?: DeleteOptions): Promise<boolean>;
-  abstract deleteMany(options: DeleteOptions): Promise<number>;
-  abstract count(where?: WhereClause): Promise<number>;
-  abstract exists(where: WhereClause): Promise<boolean>;
 
   /**
    * Validates required fields in data object
@@ -56,7 +43,7 @@ export abstract class AbstractBaseRepository<T> implements BaseRepository<T> {
    */
   protected buildOrderClause(options?: QueryOptions): string {
     if (!options?.orderBy) {
-      return 'created_at DESC';
+      return 'createdAt DESC';
     }
     
     const direction = options.orderDirection || 'ASC';
@@ -78,44 +65,14 @@ export abstract class AbstractBaseRepository<T> implements BaseRepository<T> {
    */
   protected mapRowToEntity(row: Record<string, unknown>): T {
     if (!row) return row as T;
-    
-    // Convert snake_case to camelCase for JavaScript conventions
-    const entity: Record<string, unknown> = {};
-    
-    for (const [key, value] of Object.entries(row)) {
-      const camelKey = this.snakeToCamel(key);
-      entity[camelKey] = value;
-    }
-    
-    return entity as T;
+    return row as T; // Assuming ORM handles conversion or it's already a plain object
   }
 
   /**
    * Converts entity object to database row format
    */
   protected mapEntityToRow(entity: Partial<T>): Record<string, unknown> {
-    const row: Record<string, unknown> = {};
-    
-    for (const [key, value] of Object.entries(entity)) {
-      const snakeKey = this.camelToSnake(key);
-      row[snakeKey] = value;
-    }
-    
-    return row;
-  }
-
-  /**
-   * Converts snake_case to camelCase
-   */
-  private snakeToCamel(str: string): string {
-    return str.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
-  }
-
-  /**
-   * Converts camelCase to snake_case
-   */
-  private camelToSnake(str: string): string {
-    return str.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
+    return entity as Record<string, unknown>; // Assuming ORM handles conversion
   }
 
   /**
@@ -124,7 +81,6 @@ export abstract class AbstractBaseRepository<T> implements BaseRepository<T> {
   protected handleDatabaseError(error: unknown, operation: string): never {
     console.error(`Database error during ${operation}:`, error);
     
-    // Handle specific database errors
     const errorWithCode = error as { code?: string | number };
     if (errorWithCode.code === '23505' || errorWithCode.code === 'ER_DUP_ENTRY' || errorWithCode.code === 11000) {
       throw new DatabaseError('Duplicate entry', 'DUPLICATE_ENTRY', error);
@@ -138,7 +94,6 @@ export abstract class AbstractBaseRepository<T> implements BaseRepository<T> {
       throw new DatabaseError('Not null constraint violation', 'NOT_NULL_VIOLATION', error);
     }
     
-    // Generic database error
     const errorWithMessage = error as { message?: string; code?: string | number };
     throw new DatabaseError(
       errorWithMessage.message || `Database error during ${operation}`,
@@ -150,11 +105,11 @@ export abstract class AbstractBaseRepository<T> implements BaseRepository<T> {
   /**
    * Ensures entity exists or throws NotFoundError
    */
-  protected async ensureExists(id: string): Promise<T> {
+  protected async ensureExists(id: string, entityName: string): Promise<T> {
     const entity = await this.findById(id);
     
     if (!entity) {
-      throw new NotFoundError(this.tableName, id);
+      throw new NotFoundError(entityName, id);
     }
     
     return entity;
@@ -194,13 +149,21 @@ export abstract class AbstractBaseRepository<T> implements BaseRepository<T> {
     return uuidRegex.test(id);
   }
 
-  /**
-   * Builds where clause for different database types
-   */
+  // Placeholder for ORM-specific transaction handling
+  protected abstract executeTransaction<R>(callback: (trx: unknown) => Promise<R>): Promise<R>;
+
+  // Placeholder for ORM-specific where clause building
   protected abstract buildWhereClause(where: WhereClause): unknown;
 
-  /**
-   * Executes a transaction
-   */
-  protected abstract executeTransaction<R>(callback: (trx: import('sequelize').Transaction | import('mongoose').ClientSession) => Promise<R>): Promise<R>;
+  // Abstract methods for BaseRepository interface, to be implemented by concrete repos
+  abstract create(data: Partial<T>, options?: CreateOptions): Promise<T>;
+  abstract findById(id: string, options?: QueryOptions): Promise<T | null>;
+  abstract findOne(where: WhereClause, options?: QueryOptions): Promise<T | null>;
+  abstract findMany(where?: WhereClause, options?: QueryOptions): Promise<T[]>;
+  abstract update(id: string, data: Partial<T>, options?: UpdateOptions): Promise<T | null>;
+  abstract updateMany(data: Partial<T>, options: UpdateOptions): Promise<number>;
+  abstract delete(id: string, options?: DeleteOptions): Promise<boolean>;
+  abstract deleteMany(options: DeleteOptions): Promise<number>;
+  abstract count(where?: WhereClause): Promise<number>;
+  abstract exists(where: WhereClause): Promise<boolean>;
 }

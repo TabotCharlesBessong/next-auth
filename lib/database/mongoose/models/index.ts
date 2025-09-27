@@ -1,5 +1,6 @@
 import mongoose, { Schema, Document, Model } from 'mongoose';
-import { User, Session, SocialAccount, PasswordReset, EmailVerification, AuditLog } from '../../types';
+import { User, Session, SocialAccount, PasswordReset, EmailVerification, AuditLog, RefreshToken } from '../../types';
+import { RefreshTokenDocument } from '../repositories/MongooseRefreshTokenRepository';
 
 // Extend interfaces with Mongoose Document
 export interface UserDocument extends Omit<User, 'id'>, Document {
@@ -18,13 +19,18 @@ export interface PasswordResetDocument extends Omit<PasswordReset, 'id'>, Docume
   _id: string;
 }
 
-export interface EmailVerificationDocument extends Omit<EmailVerification, 'id'>, Document {
-  _id: string;
+export interface EmailVerificationDocument extends EmailVerification, Document {
+  id: string; // Ensure 'id' is explicitly required
 }
 
 export interface AuditLogDocument extends Omit<AuditLog, 'id'>, Document {
   _id: string;
 }
+
+// Define RefreshTokenDocument here for consistency, but the actual model is in RefreshToken.ts
+// export interface RefreshTokenDocument extends Omit<RefreshToken, 'id'>, Document {
+//   _id: string;
+// }
 
 /**
  * User Schema
@@ -536,6 +542,7 @@ export const SocialAccountModel: Model<SocialAccountDocument> = mongoose.models.
 export const PasswordResetModel: Model<PasswordResetDocument> = mongoose.models.PasswordReset || mongoose.model<PasswordResetDocument>('PasswordReset', PasswordResetSchema);
 export const EmailVerificationModel: Model<EmailVerificationDocument> = mongoose.models.EmailVerification || mongoose.model<EmailVerificationDocument>('EmailVerification', EmailVerificationSchema);
 export const AuditLogModel: Model<AuditLogDocument> = mongoose.models.AuditLog || mongoose.model<AuditLogDocument>('AuditLog', AuditLogSchema);
+import { RefreshTokenModel } from './RefreshToken';
 
 // Export all models as a collection
 export const MongooseModels = {
@@ -544,7 +551,8 @@ export const MongooseModels = {
   SocialAccount: SocialAccountModel,
   PasswordReset: PasswordResetModel,
   EmailVerification: EmailVerificationModel,
-  AuditLog: AuditLogModel
+  AuditLog: AuditLogModel,
+  RefreshToken: RefreshTokenModel, // Add RefreshTokenModel here
 };
 
 // Helper function to initialize all models
@@ -573,6 +581,7 @@ export const createAllIndexes = async () => {
     SocialAccountModel.createIndexes(),
     PasswordResetModel.createIndexes(),
     EmailVerificationModel.createIndexes(),
-    AuditLogModel.createIndexes()
+    AuditLogModel.createIndexes(),
+    RefreshTokenModel.createIndexes(), // Add RefreshTokenModel to index creation
   ]);
 };
