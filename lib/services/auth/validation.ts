@@ -59,6 +59,9 @@ export const passwordResetConfirmSchema = z.object({
   password: passwordSchema,
 });
 
+// Alias for consistency
+export const passwordResetSchema = passwordResetConfirmSchema;
+
 // Change password validation schema
 export const changePasswordSchema = z.object({
   oldPassword: z.string().min(1, 'Current password is required'),
@@ -84,15 +87,15 @@ export const oauthCallbackSchema = z.object({
 });
 
 export const oauthLinkAccountSchema = z.object({
-  provider: z.enum(['google', 'facebook', 'github'], {
-    errorMap: () => ({ message: 'Invalid OAuth provider' }),
+  provider: z.enum(['google', 'facebook', 'github'] as const, {
+    message: 'Invalid OAuth provider',
   }),
   code: z.string().min(1, 'Authorization code is required'),
 });
 
 export const oauthUnlinkAccountSchema = z.object({
-  provider: z.enum(['google', 'facebook', 'github'], {
-    errorMap: () => ({ message: 'Invalid OAuth provider' }),
+  provider: z.enum(['google', 'facebook', 'github'] as const, {
+    message: 'Invalid OAuth provider',
   }),
 });
 
@@ -128,15 +131,32 @@ export const updateProfileSchema = z.object({
   }
 );
 
-// Rate limiting validation
+// Alias for consistency
+export const profileUpdateSchema = updateProfileSchema;
+
+// Rate limiting validation schema
 export const rateLimitSchema = z.object({
   identifier: z.string().min(1, 'Identifier is required'),
-  action: z.enum(['login', 'register', 'password-reset', 'email-verification'], {
-    errorMap: () => ({ message: 'Invalid action type' }),
+  action: z.enum(['login', 'register', 'password-reset', 'email-verification'] as const, {
+    message: 'Invalid action type',
   }),
 });
 
 // Validation helper functions
+// Validation function aliases for consistency with index.ts exports
+export const validateRegistration = (data: unknown) => {
+  return registerSchema.parse(data);
+};
+
+export const validateLogin = (data: unknown) => {
+  return loginSchema.parse(data);
+};
+
+export const validatePasswordReset = (data: unknown) => {
+  return passwordResetRequestSchema.parse(data);
+};
+
+// Legacy function names for backward compatibility
 export const validateRegisterData = (data: unknown) => {
   return registerSchema.parse(data);
 };
@@ -185,13 +205,21 @@ export const validateUpdateProfile = (data: unknown) => {
   return updateProfileSchema.parse(data);
 };
 
-// Custom validation error handler
+export const validateProfileUpdate = (data: unknown) => {
+  return updateProfileSchema.parse(data);
+};
+
+export const validateTokenRefresh = (data: unknown) => {
+  return refreshTokenSchema.parse(data);
+};
+
+// Error handling helper
 export const handleValidationError = (error: z.ZodError) => {
-  const errors = error.errors.map((err) => ({
+  const errors = error.issues.map((err: z.ZodIssue) => ({
     field: err.path.join('.'),
     message: err.message,
   }));
-  
+
   return {
     message: 'Validation failed',
     errors,

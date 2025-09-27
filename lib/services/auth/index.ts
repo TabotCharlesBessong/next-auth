@@ -1,8 +1,20 @@
+// Import types and services for internal use
+import type { 
+  IUserRepository, 
+  ITokenService, 
+  IEmailService, 
+  IHashService 
+} from './types';
+import { AuthService, createAuthService } from './AuthService';
+import { createHashService } from './HashService';
+import { createTokenService } from './TokenService';
+import { createEmailService, createDefaultEmailConfig } from './EmailService';
+
 // Core service exports
 export { AuthService, createAuthService } from './AuthService';
 export { TokenService, createTokenService } from './TokenService';
 export { EmailService, createEmailService, defaultEmailTemplates, createDefaultEmailConfig } from './EmailService';
-export { HashService, createHashService, defaultHashService } from './HashService';
+export { HashService, createHashService, hashService } from './HashService';
 export { OAuthService, createOAuthService } from './OAuthService';
 export { 
   SecurityService, 
@@ -60,7 +72,7 @@ export {
   emailVerificationSchema,
   profileUpdateSchema,
   oauthCallbackSchema,
-  tokenRefreshSchema,
+  refreshTokenSchema,
   rateLimitSchema,
   validateRegistration,
   validateLogin,
@@ -124,8 +136,7 @@ export const createCompleteAuthService = (factory: AuthServiceFactory): AuthServ
   // Create default services if not provided
   const hashService = factory.hashService || createHashService();
   const tokenService = factory.tokenService || createTokenService({
-    accessTokenSecret: process.env.JWT_ACCESS_SECRET || 'default-access-secret',
-    refreshTokenSecret: process.env.JWT_REFRESH_SECRET || 'default-refresh-secret',
+    jwtSecret: process.env.JWT_SECRET || 'default-jwt-secret',
     accessTokenExpiry: '1h',
     refreshTokenExpiry: '7d',
     issuer: process.env.JWT_ISSUER || 'next-auth-template',
@@ -236,6 +247,3 @@ export const createAuthServiceWithValidation = (factory: AuthServiceFactory): {
     environmentStatus,
   };
 };
-
-// Re-export error class for convenience
-export { AuthError } from './types';

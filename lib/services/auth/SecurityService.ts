@@ -1,6 +1,5 @@
-import crypto from 'crypto';
+import * as crypto from 'crypto';
 import { AuthError } from './types';
-import { rateLimitSchema } from './validation';
 
 interface RateLimitConfig {
   windowMs: number; // Time window in milliseconds
@@ -470,7 +469,7 @@ export class SecurityService {
 
     // Clean up expired CSRF tokens
     let expiredCSRFTokens = 0;
-    for (const [token, tokenData] of this.csrfTokenStore.entries()) {
+    for (const [token, tokenData] of Array.from(this.csrfTokenStore.entries())) {
       if (tokenData.expiresAt < now) {
         this.csrfTokenStore.delete(token);
         expiredCSRFTokens++;
@@ -479,7 +478,7 @@ export class SecurityService {
 
     // Clean up expired rate limit entries
     let expiredRateLimits = 0;
-    for (const [key, entry] of this.rateLimitStore.entries()) {
+    for (const [key, entry] of Array.from(this.rateLimitStore.entries())) {
       if (currentTime >= entry.resetTime) {
         this.rateLimitStore.delete(key);
         expiredRateLimits++;
@@ -558,7 +557,7 @@ export const createDevelopmentSecurityConfig = (): Partial<SecurityConfig> => ({
   session: {
     secure: false,
   },
-});
+} as any);
 
 export const createProductionSecurityConfig = (): Partial<SecurityConfig> => ({
   csrf: {
@@ -581,19 +580,35 @@ export const createProductionSecurityConfig = (): Partial<SecurityConfig> => ({
     secure: true,
     sameSite: 'strict',
   },
-});
+} as any);
 
 // Middleware helper functions
+interface MiddlewareRequest {
+  method?: string;
+  headers: Record<string, string | string[] | undefined>;
+  body?: Record<string, unknown>;
+  sessionID?: string;
+  session?: { id?: string };
+  ip?: string;
+  connection?: { remoteAddress?: string };
+}
+
+interface MiddlewareResponse {
+  status: (code: number) => { json: (data: Record<string, unknown>) => void };
+}
+
+type NextFunction = (error?: any) => void;
+
 export const createCSRFMiddleware = (securityService: SecurityService) => {
-  return (req: any, res: any, next: any) => {
+  return (req: MiddlewareRequest, res: MiddlewareResponse, next: NextFunction) => {
     if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') {
       return next();
     }
 
-    const token = req.headers[securityService.getConfig().csrf.headerName] || req.body._csrf;
+    const token = req.headers[securityService.getConfig().csrf.headerName] || req.body?._csrf;
     const sessionId = req.sessionID || req.session?.id;
 
-    if (!securityService.validateCSRFToken(token, sessionId)) {
+    if (!securityService.validateCSRFToken(token as string, sessionId as string)) {
       return res.status(403).json({ error: 'Invalid CSRF token' });
     }
 
@@ -602,10 +617,10 @@ export const createCSRFMiddleware = (securityService: SecurityService) => {
 };
 
 export const createRateLimitMiddleware = (securityService: SecurityService, endpoint: keyof SecurityConfig['rateLimit']) => {
-  return (req: any, res: any, next: any) => {
+  return (req: MiddlewareRequest, res: MiddlewareResponse, next: NextFunction) => {
     try {
-      const identifier = req.ip || req.connection.remoteAddress;
-      securityService.checkRateLimit(endpoint, identifier);
+      const identifier = req.ip || req.connection?.remoteAddress;
+      securityService.checkRateLimit(endpoint, identifier as string);
       next();
     } catch (error) {
       if (error instanceof AuthError && error.code === 'RATE_LIMIT_EXCEEDED') {
