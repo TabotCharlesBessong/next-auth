@@ -1,72 +1,147 @@
 import { AuthService, createAuthService } from '../AuthService';
-import { HashService } from '../HashService';
-import { TokenService } from '../TokenService';
-import { EmailService } from '../EmailService';
-import { AuthError } from '../types';
+import { createHashService } from '../HashService';
+import { createTokenService } from '../TokenService';
+import { createEmailService, createDefaultEmailConfig } from '../EmailService';
+import { AuthError, IUserRepository, ITokenService, IEmailService, IHashService } from '../types';
+import { User } from '../../../database/types';
 
 // Mock the database
 const mockDatabase = {
-  users: new Map(),
-  emailVerificationTokens: new Map(),
-  passwordResetTokens: new Map(),
+  users: new Map<string, User>(),
+  emailVerificationTokens: new Map<string, { userId: string; expiresAt: Date }>(),
+  passwordResetTokens: new Map<string, { userId: string; expiresAt: Date }>(),
   
-  async findUserByEmail(email: string) {
-    return Array.from(this.users.values()).find((user: any) => user.email === email);
+  async findUserByEmail(email: string): Promise<User | null> {
+    return Array.from(this.users.values()).find((user: User) => user.email === email) || null;
   },
   
-  async findUserById(id: string) {
-    return this.users.get(id);
+  async findUserById(id: string): Promise<User | null> {
+    return this.users.get(id) || null;
   },
   
-  async createUser(userData: any) {
+  async createUser(userData: Partial<User>): Promise<User> {
     const id = `user_${Date.now()}_${Math.random()}`;
-    const user = { id, ...userData, createdAt: new Date(), updatedAt: new Date() };
+    const user: User = { 
+      id, 
+      ...userData, 
+      createdAt: new Date(), 
+      updatedAt: new Date(),
+      role: userData.role || 'user',
+      emailVerified: userData.emailVerified || false,
+      isActive: userData.isActive !== undefined ? userData.isActive : true
+    };
     this.users.set(id, user);
     return user;
   },
   
-  async updateUser(id: string, updates: any) {
+  async updateUser(id: string, updates: Partial<User>): Promise<User | null> {
     const user = this.users.get(id);
     if (!user) return null;
     
-    const updatedUser = { ...user, ...updates, updatedAt: new Date() };
+    const updatedUser: User = { ...user, ...updates, updatedAt: new Date() };
     this.users.set(id, updatedUser);
     return updatedUser;
   },
   
-  async deleteUser(id: string) {
-    return this.users.delete(id);
+  async deleteUser(id: string): Promise<void> {
+    this.users.delete(id);
   },
   
-  async storeEmailVerificationToken(userId: string, token: string, expiresAt: Date) {
+  async findUserByProvider(provider: string, providerId: string): Promise<User | null> {
+    return Array.from(this.users.values()).find((user: User) => 
+      user.oauthAccounts?.[provider]?.id === providerId
+    ) || null;
+  },
+  
+  async findUserByOAuthId(provider: string, oauthId: string): Promise<User | null> {
+    return Array.from(this.users.values()).find((user: User) => 
+      user.oauthAccounts?.[provider]?.id === oauthId
+    ) || null;
+  },
+  
+  async storeEmailVerificationToken(userId: string, token: string, expiresAt: Date): Promise<void> {
     this.emailVerificationTokens.set(token, { userId, token, expiresAt });
   },
   
-  async getEmailVerificationToken(token: string) {
+  async getEmailVerificationToken(token: string): Promise<{ userId: string; expiresAt: Date } | undefined> {
     return this.emailVerificationTokens.get(token);
   },
   
-  async deleteEmailVerificationToken(token: string) {
-    return this.emailVerificationTokens.delete(token);
+  async deleteEmailVerificationToken(token: string): Promise<void> {
+    this.emailVerificationTokens.delete(token);
   },
   
-  async storePasswordResetToken(userId: string, token: string, expiresAt: Date) {
-    this.passwordResetTokens.set(token, { userId, token, expiresAt });
+  async storePasswordResetToken(userId: string, token: string, expiresAt: Date): Promise<void> {
+    this.passwordResetTokens.set(token, { userId, expiresAt });
   },
   
-  async getPasswordResetToken(token: string) {
+  async getPasswordResetToken(token: string): Promise<{ userId: string; expiresAt: Date } | undefined> {
     return this.passwordResetTokens.get(token);
   },
   
-  async deletePasswordResetToken(token: string) {
-    return this.passwordResetTokens.delete(token);
+  async deletePasswordResetToken(token: string): Promise<void> {
+    this.passwordResetTokens.delete(token);
   },
   
-  clear() {
+  clear(): void {
     this.users.clear();
     this.emailVerificationTokens.clear();
     this.passwordResetTokens.clear();
   }
+};
+
+// Create mock user repository
+const createMockUserRepository = (): IUserRepository => ({
+  create: mockDatabase.createUser.bind(mockDatabase),
+  findById: mockDatabase.findUserById.bind(mockDatabase),
+  findByEmail: mockDatabase.findUserByEmail.bind(mockDatabase),
+  update: mockDatabase.updateUser.bind(mockDatabase),
+  delete: mockDatabase.deleteUser.bind(mockDatabase),
+  findByProvider: mockDatabase.findUserByProvider.bind(mockDatabase),
+  findByOAuthId: mockDatabase.findUserByOAuthId.bind(mockDatabase)
+});
+
+// Create mock token service
+const createMockTokenService = (): ITokenService => {
+  const tokenService = createTokenService({
+    jwtSecret: 'test-secret-key-for-testing-purposes-only',
+    accessTokenExpiry: '15m',
+    refreshTokenExpiry: '7d',
+    issuer: 'test-issuer',
+    audience: 'test-audience'
+  });
+  
+  return {
+    generateAccessToken: tokenService.generateAccessToken.bind(tokenService),
+    generateRefreshToken: tokenService.generateRefreshToken.bind(tokenService),
+    generateTokenPair: tokenService.generateTokenPair.bind(tokenService),
+    verifyToken: tokenService.verifyToken.bind(tokenService),
+    revokeToken: tokenService.revokeToken.bind(tokenService),
+    cleanupExpiredTokens: tokenService.cleanupExpiredTokens.bind(tokenService)
+  };
+};
+
+// Create mock email service
+const createMockEmailService = (): IEmailService => {
+  const emailService = createEmailService(createDefaultEmailConfig());
+  
+  return {
+    sendVerificationEmail: emailService.sendVerificationEmail.bind(emailService),
+    sendPasswordResetEmail: emailService.sendPasswordResetEmail.bind(emailService),
+    sendWelcomeEmail: emailService.sendWelcomeEmail.bind(emailService),
+    verifyEmailToken: emailService.verifyEmailToken.bind(emailService)
+  };
+};
+
+// Create mock hash service
+const createMockHashService = (): IHashService => {
+  const hashService = createHashService(10); // Lower salt rounds for faster tests
+  
+  return {
+    hashPassword: hashService.hashPassword.bind(hashService),
+    comparePassword: hashService.comparePassword.bind(hashService),
+    generateSalt: hashService.generateSalt.bind(hashService)
+  };
 };
 
 // Mock environment variables
@@ -83,6 +158,10 @@ const mockEnv = {
 
 describe('AuthService', () => {
   let authService: AuthService;
+  let mockTokenService: ITokenService;
+  let mockUserRepository: IUserRepository;
+  let mockEmailService: IEmailService;
+  let mockHashService: IHashService;
 
   beforeEach(() => {
     // Set up environment variables
@@ -91,9 +170,26 @@ describe('AuthService', () => {
     // Clear mock database
     mockDatabase.clear();
     
-    // Create auth service with mock database
+    // Create mock services
+    mockUserRepository = createMockUserRepository();
+    mockTokenService = createMockTokenService();
+    mockEmailService = createMockEmailService();
+    mockHashService = createMockHashService();
+    
+    // Create auth service with proper mock implementations
     authService = createAuthService({
-      database: mockDatabase as any,
+      userRepository: mockUserRepository,
+      tokenService: mockTokenService,
+      emailService: mockEmailService,
+      hashService: mockHashService,
+      options: {
+        requireEmailVerification: true,
+        enablePasswordReset: true,
+        maxLoginAttempts: 5,
+        lockoutDuration: 15,
+        sessionDuration: 60,
+        refreshTokenDuration: 7
+      }
     });
   });
 
@@ -193,7 +289,7 @@ describe('AuthService', () => {
       
       // Check that verification token was stored
       const tokens = Array.from(mockDatabase.emailVerificationTokens.values());
-      const userToken = tokens.find((token: any) => token.userId === result.user?.id);
+      const userToken = tokens.find((token: { userId: string; expiresAt: Date }) => token.userId === result.user?.id);
       expect(userToken).toBeDefined();
     });
   });
@@ -290,9 +386,8 @@ describe('AuthService', () => {
       await authService.logout(accessToken);
 
       // Tokens should be revoked and invalid
-      const tokenService = (authService as any).tokenService;
-      const isAccessTokenRevoked = await tokenService.isTokenRevoked(accessToken);
-      const isRefreshTokenRevoked = await tokenService.isTokenRevoked(refreshToken);
+      const isAccessTokenRevoked = await mockTokenService.isTokenRevoked(accessToken);
+      const isRefreshTokenRevoked = await mockTokenService.isTokenRevoked(refreshToken);
 
       expect(isAccessTokenRevoked).toBe(true);
       expect(isRefreshTokenRevoked).toBe(true);
@@ -308,7 +403,6 @@ describe('AuthService', () => {
 
   describe('refreshToken', () => {
     let refreshToken: string;
-    let userId: string;
 
     beforeEach(async () => {
       const registerResult = await authService.register({
@@ -319,7 +413,6 @@ describe('AuthService', () => {
       });
 
       refreshToken = registerResult.tokens!.refreshToken;
-      userId = registerResult.user!.id;
     });
 
     it('should refresh access token successfully', async () => {
@@ -340,8 +433,7 @@ describe('AuthService', () => {
 
     it('should reject revoked refresh token', async () => {
       // Revoke the refresh token
-      const tokenService = (authService as any).tokenService;
-      await tokenService.revokeToken(refreshToken);
+      await mockTokenService.revokeToken(refreshToken);
 
       await expect(authService.refreshToken(refreshToken))
         .rejects.toThrow(AuthError);
@@ -424,8 +516,7 @@ describe('AuthService', () => {
       });
 
       // Old tokens should be revoked
-      const tokenService = (authService as any).tokenService;
-      const isTokenRevoked = await tokenService.isTokenRevoked(accessToken);
+      const isTokenRevoked = await mockTokenService.isTokenRevoked(accessToken);
       expect(isTokenRevoked).toBe(true);
     });
   });
@@ -454,7 +545,7 @@ describe('AuthService', () => {
       expect(tokens.length).toBeGreaterThan(0);
 
       const user = await mockDatabase.findUserByEmail('reset@example.com');
-      const userToken = tokens.find((token: any) => token.userId === user.id);
+      const userToken = tokens.find((token: { userId: string; expiresAt: Date }) => token.userId === user.id);
       expect(userToken).toBeDefined();
     });
 
@@ -536,8 +627,7 @@ describe('AuthService', () => {
       await authService.resetPassword(resetToken, 'NewP@ssw0rd123!');
 
       // Old tokens should be revoked
-      const tokenService = (authService as any).tokenService;
-      const isTokenRevoked = await tokenService.isTokenRevoked(accessToken);
+      const isTokenRevoked = await mockTokenService.isTokenRevoked(accessToken);
       expect(isTokenRevoked).toBe(true);
     });
   });
@@ -762,8 +852,7 @@ describe('AuthService', () => {
     it('should revoke all user tokens on account deletion', async () => {
       await authService.deleteAccount(userId, 'SecureP@ssw0rd123!');
 
-      const tokenService = (authService as any).tokenService;
-      const isTokenRevoked = await tokenService.isTokenRevoked(accessToken);
+      const isTokenRevoked = await mockTokenService.isTokenRevoked(accessToken);
       expect(isTokenRevoked).toBe(true);
     });
 
@@ -803,9 +892,8 @@ describe('AuthService', () => {
       });
 
       // Mock token service to throw error
-      const tokenService = (authService as any).tokenService;
-      const originalGenerateAccessToken = tokenService.generateAccessToken;
-      tokenService.generateAccessToken = jest.fn().mockRejectedValue(new Error('Token error'));
+      const originalGenerateAccessToken = mockTokenService.generateAccessToken;
+      mockTokenService.generateAccessToken = jest.fn().mockRejectedValue(new Error('Token error'));
 
       await expect(authService.login({
         email: 'tokentest@example.com',
@@ -813,7 +901,7 @@ describe('AuthService', () => {
       })).rejects.toThrow();
 
       // Restore original method
-      tokenService.generateAccessToken = originalGenerateAccessToken;
+      mockTokenService.generateAccessToken = originalGenerateAccessToken;
     });
   });
 
@@ -825,7 +913,7 @@ describe('AuthService', () => {
       };
 
       const customAuthService = createAuthService({
-        database: mockDatabase as any,
+        userRepository: createMockUserRepository(),
         ...customConfig,
       });
 
@@ -833,7 +921,7 @@ describe('AuthService', () => {
     });
 
     it('should handle missing database configuration', () => {
-      expect(() => createAuthService({})).toThrow();
+      expect(() => createAuthService({} as Record<string, never>)).toThrow();
     });
   });
 });

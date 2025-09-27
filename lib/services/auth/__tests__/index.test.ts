@@ -13,7 +13,15 @@ import {
   createSecurityService,
   validateEnvironment,
   getEnvironmentConfig,
+  createDefaultEmailConfig,
+  IUserRepository,
+  ITokenService,
+  IEmailService,
+  IHashService,
+  OAuthProvider,
+  OAuthConfig,
 } from '../index';
+import { User } from '../../../database/types';
 
 // Mock environment variables
 const mockEnv = {
@@ -37,40 +45,59 @@ const mockEnv = {
 
 // Mock database
 const mockDatabase = {
-  users: new Map(),
-  emailVerificationTokens: new Map(),
-  passwordResetTokens: new Map(),
-  oauthAccounts: new Map(),
-  oauthStates: new Map(),
-  revokedTokens: new Set(),
-  rateLimitData: new Map(),
+  users: new Map<string, User>(),
+  emailVerificationTokens: new Map<string, { userId: string; expiresAt: Date }>(),
+  passwordResetTokens: new Map<string, { userId: string; expiresAt: Date }>(),
+  oauthAccounts: new Map<string, { id: string; userId: string; provider: string; providerId: string }>(),
+  oauthStates: new Map<string, { provider: string; redirectUri: string }>(),
+  revokedTokens: new Set<string>(),
+  rateLimitData: new Map<string, { count: number; resetTime: number }>(),
   
-  async findUserByEmail(email: string) {
-    return Array.from(this.users.values()).find((user: any) => user.email === email);
+  async findUserByEmail(email: string): Promise<User | null> {
+    return Array.from(this.users.values()).find((user: User) => user.email === email) || null;
   },
   
-  async findUserById(id: string) {
-    return this.users.get(id);
+  async findUserById(id: string): Promise<User | null> {
+    return this.users.get(id) || null;
   },
   
-  async createUser(userData: any) {
+  async createUser(userData: Partial<User>): Promise<User> {
     const id = `user_${Date.now()}_${Math.random()}`;
-    const user = { id, ...userData, createdAt: new Date(), updatedAt: new Date() };
+    const user: User = { 
+      id, 
+      ...userData, 
+      createdAt: new Date(), 
+      updatedAt: new Date(),
+      emailVerified: false,
+      role: 'user'
+    };
     this.users.set(id, user);
     return user;
   },
   
-  async updateUser(id: string, updates: any) {
+  async updateUser(id: string, updates: Partial<User>): Promise<User | null> {
     const user = this.users.get(id);
     if (!user) return null;
     
-    const updatedUser = { ...user, ...updates, updatedAt: new Date() };
+    const updatedUser: User = { ...user, ...updates, updatedAt: new Date() };
     this.users.set(id, updatedUser);
     return updatedUser;
   },
   
-  async deleteUser(id: string) {
-    return this.users.delete(id);
+  async deleteUser(id: string): Promise<void> {
+    this.users.delete(id);
+  },
+  
+  async findUserByProvider(provider: string, providerId: string): Promise<User | null> {
+    return Array.from(this.users.values()).find((user: User) => 
+      user.oauthAccounts?.[provider]?.id === providerId
+    ) || null;
+  },
+  
+  async findUserByOAuthId(provider: string, oauthId: string): Promise<User | null> {
+    return Array.from(this.users.values()).find((user: User) => 
+      user.oauthAccounts?.[provider]?.id === oauthId
+    ) || null;
   },
   
   // Email verification methods
@@ -101,19 +128,19 @@ const mockDatabase = {
   
   // OAuth methods
   async findOAuthAccount(provider: string, providerId: string) {
-    return Array.from(this.oauthAccounts.values()).find((account: any) => 
+    return Array.from(this.oauthAccounts.values()).find((account) => 
       account.provider === provider && account.providerId === providerId
     );
   },
   
-  async createOAuthAccount(accountData: any) {
+  async createOAuthAccount(accountData: { userId: string; provider: string; providerId: string }) {
     const id = `oauth_${Date.now()}_${Math.random()}`;
     const account = { id, ...accountData, createdAt: new Date(), updatedAt: new Date() };
     this.oauthAccounts.set(id, account);
     return account;
   },
   
-  async updateOAuthAccount(id: string, updates: any) {
+  async updateOAuthAccount(id: string, updates: Partial<{ userId: string; provider: string; providerId: string }>) {
     const account = this.oauthAccounts.get(id);
     if (!account) return null;
     
@@ -127,12 +154,12 @@ const mockDatabase = {
   },
   
   async getUserOAuthAccounts(userId: string) {
-    return Array.from(this.oauthAccounts.values()).filter((account: any) => 
+    return Array.from(this.oauthAccounts.values()).filter((account) => 
       account.userId === userId
     );
   },
   
-  async storeOAuthState(state: string, data: any) {
+  async storeOAuthState(state: string, data: { provider: string; redirectUri: string }) {
     this.oauthStates.set(state, { ...data, createdAt: new Date() });
   },
   
@@ -161,7 +188,6 @@ const mockDatabase = {
   
   async cleanupRevokedTokens() {
     // In a real implementation, this would clean up expired revoked tokens
-    const sizeBefore = this.revokedTokens.size;
     return { cleanedCount: 0 }; // Mock cleanup
   },
   
@@ -170,7 +196,7 @@ const mockDatabase = {
     return this.rateLimitData.get(key);
   },
   
-  async setRateLimitData(key: string, data: any) {
+  async setRateLimitData(key: string, data: { count: number; resetTime: number }) {
     this.rateLimitData.set(key, data);
   },
   
@@ -188,6 +214,82 @@ const mockDatabase = {
     this.rateLimitData.clear();
   }
 };
+
+// Create mock user repository
+const createMockUserRepository = (): IUserRepository => ({
+  create: mockDatabase.createUser.bind(mockDatabase),
+  findById: mockDatabase.findUserById.bind(mockDatabase),
+  findByEmail: mockDatabase.findUserByEmail.bind(mockDatabase),
+  update: mockDatabase.updateUser.bind(mockDatabase),
+  delete: mockDatabase.deleteUser.bind(mockDatabase),
+  findByProvider: mockDatabase.findUserByProvider.bind(mockDatabase),
+  findByOAuthId: mockDatabase.findUserByOAuthId.bind(mockDatabase)
+});
+
+// Create mock token service
+const createMockTokenService = (): ITokenService => {
+  const tokenService = createTokenService({
+    jwtSecret: 'test-secret-key-for-testing-purposes-only',
+    accessTokenExpiry: '15m',
+    refreshTokenExpiry: '7d',
+    issuer: 'test-issuer',
+    audience: 'test-audience'
+  });
+  
+  return {
+    generateAccessToken: tokenService.generateAccessToken.bind(tokenService),
+    generateRefreshToken: tokenService.generateRefreshToken.bind(tokenService),
+    generateTokenPair: tokenService.generateTokenPair.bind(tokenService),
+    verifyToken: tokenService.verifyToken.bind(tokenService),
+    revokeToken: tokenService.revokeToken.bind(tokenService),
+    cleanupExpiredTokens: tokenService.cleanupExpiredTokens.bind(tokenService)
+  };
+};
+
+// Create mock email service
+const createMockEmailService = (): IEmailService => {
+  const emailService = createEmailService(createDefaultEmailConfig());
+  
+  return {
+    sendVerificationEmail: emailService.sendVerificationEmail.bind(emailService),
+    sendPasswordResetEmail: emailService.sendPasswordResetEmail.bind(emailService),
+    sendWelcomeEmail: emailService.sendWelcomeEmail.bind(emailService),
+    verifyEmailToken: emailService.verifyEmailToken.bind(emailService)
+  };
+};
+
+// Create mock hash service
+const createMockHashService = (): IHashService => {
+  const hashService = createHashService();
+  
+  return {
+    hashPassword: hashService.hashPassword.bind(hashService),
+    comparePassword: hashService.comparePassword.bind(hashService),
+    generateSalt: hashService.generateSalt.bind(hashService)
+  };
+};
+
+// Create mock OAuth configs
+const createMockOAuthConfigs = (): Record<OAuthProvider, OAuthConfig> => ({
+  google: {
+    clientId: 'test-google-client-id',
+    clientSecret: 'test-google-client-secret',
+    redirectUri: 'http://localhost:3000/auth/callback/google',
+    scope: ['openid', 'profile', 'email']
+  },
+  facebook: {
+    clientId: 'test-facebook-app-id',
+    clientSecret: 'test-facebook-app-secret',
+    redirectUri: 'http://localhost:3000/auth/callback/facebook',
+    scope: ['email', 'public_profile']
+  },
+  github: {
+    clientId: 'test-github-client-id',
+    clientSecret: 'test-github-client-secret',
+    redirectUri: 'http://localhost:3000/auth/callback/github',
+    scope: ['user:email']
+  }
+});
 
 describe('Auth Services Integration', () => {
   beforeEach(() => {
@@ -307,21 +409,43 @@ describe('Auth Services Integration', () => {
   describe('Service Factory Functions', () => {
     it('should create AuthService with dependencies', () => {
       const authService = createAuthService({
-        database: mockDatabase as any,
+        userRepository: createMockUserRepository(),
+        tokenService: createMockTokenService(),
+        emailService: createMockEmailService(),
+        hashService: createMockHashService(),
+        options: {
+          jwtSecret: 'test-secret',
+          jwtRefreshSecret: 'test-refresh-secret',
+          jwtExpiresIn: '1h',
+          jwtRefreshExpiresIn: '7d',
+          emailVerificationExpiresIn: '24h',
+          passwordResetExpiresIn: '1h',
+          maxLoginAttempts: 5,
+          lockoutDuration: '15m',
+          enableEmailVerification: true,
+          enablePasswordReset: true,
+          enableAccountLocking: true
+        }
       });
       
       expect(authService).toBeInstanceOf(AuthService);
     });
 
     it('should create TokenService independently', () => {
-      const tokenService = createTokenService();
+      const tokenService = createTokenService({
+        jwtSecret: 'test-secret-that-is-at-least-32-characters-long-for-jwt',
+        accessTokenExpiry: '15m',
+        refreshTokenExpiry: '7d',
+        issuer: 'test-issuer'
+      });
       
       expect(tokenService).toBeInstanceOf(TokenService);
     });
 
     it('should create EmailService with database', () => {
       const emailService = createEmailService({
-        database: mockDatabase as any,
+        emailConfig: createDefaultEmailConfig(),
+        userRepository: createMockUserRepository()
       });
       
       expect(emailService).toBeInstanceOf(EmailService);
@@ -335,7 +459,9 @@ describe('Auth Services Integration', () => {
 
     it('should create OAuthService with database', () => {
       const oauthService = createOAuthService({
-        database: mockDatabase as any,
+        userRepository: createMockUserRepository(),
+        tokenService: createMockTokenService(),
+        configs: createMockOAuthConfigs()
       });
       
       expect(oauthService).toBeInstanceOf(OAuthService);
@@ -343,7 +469,17 @@ describe('Auth Services Integration', () => {
 
     it('should create SecurityService with database', () => {
       const securityService = createSecurityService({
-        database: mockDatabase as any,
+        userRepository: createMockUserRepository(),
+        options: {
+          csrfSecret: 'test-csrf-secret',
+          enableCSRF: true,
+          enableRateLimit: true,
+          rateLimitWindow: '15m',
+          rateLimitMax: 100,
+          enableBruteForceProtection: true,
+          maxFailedAttempts: 5,
+          lockoutDuration: '15m'
+        }
       });
       
       expect(securityService).toBeInstanceOf(SecurityService);
@@ -353,18 +489,62 @@ describe('Auth Services Integration', () => {
   describe('Service Integration', () => {
     let authService: AuthService;
     let tokenService: TokenService;
-    let emailService: EmailService;
     let hashService: HashService;
-    let oauthService: OAuthService;
     let securityService: SecurityService;
 
     beforeEach(() => {
-      authService = createAuthService({ database: mockDatabase as any });
-      tokenService = createTokenService();
-      emailService = createEmailService({ database: mockDatabase as any });
+      tokenService = createTokenService({
+        jwtSecret: 'test-secret-that-is-at-least-32-characters-long-for-jwt',
+        accessTokenExpiry: '15m',
+        refreshTokenExpiry: '7d',
+        issuer: 'test-issuer'
+      });
       hashService = createHashService();
-      oauthService = createOAuthService({ database: mockDatabase as any });
-      securityService = createSecurityService({ database: mockDatabase as any });
+      
+      authService = createAuthService({
+        userRepository: createMockUserRepository(),
+        tokenService,
+        emailService: createMockEmailService(),
+        hashService,
+        options: {
+          jwtSecret: 'test-secret',
+          jwtRefreshSecret: 'test-refresh-secret',
+          jwtExpiresIn: '1h',
+          jwtRefreshExpiresIn: '7d',
+          emailVerificationExpiresIn: '24h',
+          passwordResetExpiresIn: '1h',
+          maxLoginAttempts: 5,
+          lockoutDuration: '15m',
+          enableEmailVerification: true,
+          enablePasswordReset: true,
+          enableAccountLocking: true
+        }
+      });
+      
+      emailService = createEmailService({
+        emailConfig: createDefaultEmailConfig(),
+        userRepository: createMockUserRepository()
+      });
+      
+      oauthService = createOAuthService({
+        userRepository: createMockUserRepository(),
+        tokenService,
+        configs: createMockOAuthConfigs()
+      });
+      
+      securityService = createSecurityService({
+        userRepository: createMockUserRepository(),
+        options: {
+          csrfSecret: 'test-csrf-secret',
+          enableCSRF: true,
+          enableRateLimit: true,
+          rateLimitWindow: '15m',
+          rateLimitMax: 100,
+          enableBruteForceProtection: true,
+          maxFailedAttempts: 5,
+          lockoutDuration: '15m'
+        }
+      });
     });
 
     it('should complete full registration flow', async () => {
@@ -453,7 +633,7 @@ describe('Auth Services Integration', () => {
         lastName: 'Test',
       };
 
-      const registerResult = await authService.register(userData);
+      await authService.register(userData);
 
       // Request password reset
       const resetRequestResult = await authService.requestPasswordReset(userData.email);
@@ -539,22 +719,27 @@ describe('Auth Services Integration', () => {
 
   describe('Error Handling Integration', () => {
     it('should handle service dependency failures gracefully', () => {
-      // Test with invalid database
-      expect(() => createAuthService({ database: null as any }))
-        .toThrow();
+      // Test with invalid userRepository
+      expect(() => createAuthService({ 
+        userRepository: null as unknown as IUserRepository,
+        tokenService: createMockTokenService(),
+        emailService: createMockEmailService(),
+        hashService: createMockHashService()
+      })).toThrow();
     });
 
-    it('should handle missing environment variables', () => {
-      delete process.env.JWT_SECRET;
-      
-      expect(() => createTokenService())
+    it('should handle missing JWT secret in config', () => {
+      expect(() => createTokenService({} as any))
         .toThrow();
     });
 
     it('should handle invalid configuration', () => {
       process.env.EMAIL_PROVIDER = 'invalid-provider';
       
-      expect(() => createEmailService({ database: mockDatabase as any }))
+      expect(() => createEmailService({
+        emailConfig: createDefaultEmailConfig(),
+        userRepository: createMockUserRepository()
+      }))
         .toThrow();
     });
   });
@@ -566,10 +751,43 @@ describe('Auth Services Integration', () => {
     let tokenService: TokenService;
 
     beforeEach(() => {
-      authService = createAuthService({ database: mockDatabase as any });
-      emailService = createEmailService({ database: mockDatabase as any });
-      oauthService = createOAuthService({ database: mockDatabase as any });
-      tokenService = createTokenService();
+      tokenService = createTokenService({
+        jwtSecret: 'test-secret-that-is-at-least-32-characters-long-for-jwt',
+        accessTokenExpiry: '15m',
+        refreshTokenExpiry: '7d',
+        issuer: 'test-issuer'
+      });
+      
+      authService = createAuthService({
+        userRepository: createMockUserRepository(),
+        tokenService,
+        emailService: createMockEmailService(),
+        hashService: createMockHashService(),
+        options: {
+          jwtSecret: 'test-secret',
+          jwtRefreshSecret: 'test-refresh-secret',
+          jwtExpiresIn: '1h',
+          jwtRefreshExpiresIn: '7d',
+          emailVerificationExpiresIn: '24h',
+          passwordResetExpiresIn: '1h',
+          maxLoginAttempts: 5,
+          lockoutDuration: '15m',
+          enableEmailVerification: true,
+          enablePasswordReset: true,
+          enableAccountLocking: true
+        }
+      });
+      
+      emailService = createEmailService({
+        emailConfig: createDefaultEmailConfig(),
+        userRepository: createMockUserRepository()
+      });
+      
+      oauthService = createOAuthService({
+        userRepository: createMockUserRepository(),
+        tokenService,
+        configs: createMockOAuthConfigs()
+      });
     });
 
     it('should clean up expired tokens', async () => {
@@ -634,15 +852,16 @@ describe('Auth Services Integration', () => {
 
   describe('Configuration Flexibility', () => {
     it('should support custom configuration', () => {
-      const customConfig = {
-        emailVerification: { enabled: false },
-        passwordReset: { enabled: false },
-        oauth: { enabled: false },
-      };
-
       const customAuthService = createAuthService({
-        database: mockDatabase as any,
-        ...customConfig,
+        userRepository: createMockUserRepository(),
+        tokenService: createMockTokenService(),
+        emailService: createMockEmailService(),
+        hashService: createMockHashService(),
+        options: {
+          emailVerification: { enabled: false },
+          passwordReset: { enabled: false },
+          oauth: { enabled: false },
+        },
       });
 
       expect(customAuthService).toBeDefined();

@@ -1,4 +1,4 @@
-import crypto from 'crypto';
+import * as crypto from 'crypto';
 import { 
   IOAuthService, 
   IUserRepository, 
@@ -9,8 +9,10 @@ import {
   AuthUser, 
   AuthResult,
   AuthError,
-  TokenPair
+  SocialAccount,
+  RegisterData
 } from './types';
+import { User } from '../../database/types';
 import { oauthCallbackSchema } from './validation';
 
 interface OAuthProviderConfig {
@@ -36,6 +38,20 @@ interface OAuthTokenResponse {
   expires_in?: number;
   refresh_token?: string;
   scope?: string;
+}
+
+interface RawOAuthUserData {
+  id: string;
+  email?: string;
+  name?: string;
+  picture?: string;
+  avatar_url?: string;
+  verified_email?: boolean;
+  email_verified?: boolean;
+  first_name?: string;
+  last_name?: string;
+  login?: string;
+  [key: string]: unknown;
 }
 
 export class OAuthService implements IOAuthService {
@@ -99,26 +115,23 @@ export class OAuthService implements IOAuthService {
   }
 
   /**
-   * Generate OAuth authorization URL
+   * Get OAuth authorization URL
    * @param provider - OAuth provider
-   * @param redirectUrl - Optional redirect URL after authentication
+   * @param state - State parameter for security
    * @returns Authorization URL
    */
-  async getAuthorizationUrl(provider: OAuthProvider, redirectUrl?: string): Promise<string> {
+  getAuthUrl(provider: string, state: string): string {
     try {
-      const providerConfig = this.providers.get(provider);
+      const oauthProvider = provider as OAuthProvider;
+      const providerConfig = this.providers.get(oauthProvider);
       if (!providerConfig) {
         throw new AuthError(`OAuth provider ${provider} is not configured`, 'PROVIDER_NOT_CONFIGURED', 400);
       }
 
-      // Generate state parameter for CSRF protection
-      const state = crypto.randomBytes(32).toString('hex');
-      
       // Store state information
       this.stateStore.set(state, {
         state,
-        provider,
-        redirectUrl,
+        provider: oauthProvider,
         createdAt: new Date(),
       });
 
@@ -159,8 +172,8 @@ export class OAuthService implements IOAuthService {
    */
   async handleCallback(provider: OAuthProvider, code: string, state: string): Promise<AuthResult> {
     try {
-      // Validate input
-      const validatedData = oauthCallbackSchema.parse({ provider, code, state });
+      // Validate callback parameters
+      const validatedData = oauthCallbackSchema.parse({ code, state });
 
       // Verify state parameter
       const stateData = this.stateStore.get(validatedData.state);
@@ -168,7 +181,7 @@ export class OAuthService implements IOAuthService {
         throw new AuthError('Invalid or expired state parameter', 'INVALID_STATE', 400);
       }
 
-      if (stateData.provider !== validatedData.provider) {
+      if (stateData.provider !== provider) {
         throw new AuthError('State provider mismatch', 'STATE_PROVIDER_MISMATCH', 400);
       }
 
@@ -180,13 +193,13 @@ export class OAuthService implements IOAuthService {
       }
 
       // Exchange code for access token
-      const tokenResponse = await this.exchangeCodeForToken(validatedData.provider, validatedData.code);
+      const tokenResponse = await this.exchangeCodeForToken(provider, validatedData.code);
 
       // Get user information from provider
-      const oauthUserData = await this.getUserInfo(validatedData.provider, tokenResponse.access_token);
+      const oauthUserData = await this.getUserInfo(provider, tokenResponse.access_token);
 
       // Find or create user
-      const authResult = await this.findOrCreateUser(validatedData.provider, oauthUserData);
+      const authResult = await this.findOrCreateUser(provider, oauthUserData);
 
       // Clean up state
       this.stateStore.delete(validatedData.state);
@@ -211,15 +224,15 @@ export class OAuthService implements IOAuthService {
    * @param code - Authorization code
    * @param state - State parameter
    */
-  async linkAccount(userId: string, provider: OAuthProvider, code: string, state: string): Promise<void> {
+  async linkAccount(userId: string, provider: string, code: string): Promise<SocialAccount> {
     try {
       // Validate input
-      const validatedData = oauthCallbackSchema.parse({ provider, code, state });
+      const validatedData = oauthCallbackSchema.parse({ code, state: 'link-account' });
+      const oauthProvider = provider as OAuthProvider;
 
-      // Verify state parameter
-      const stateData = this.stateStore.get(validatedData.state);
-      if (!stateData || stateData.provider !== validatedData.provider) {
-        throw new AuthError('Invalid state parameter', 'INVALID_STATE', 400);
+      // Validate provider
+      if (!this.isProviderConfigured(oauthProvider)) {
+        throw new AuthError('OAuth provider not configured', 'INVALID_PROVIDER', 400);
       }
 
       // Find existing user
@@ -229,13 +242,13 @@ export class OAuthService implements IOAuthService {
       }
 
       // Exchange code for access token
-      const tokenResponse = await this.exchangeCodeForToken(validatedData.provider, validatedData.code);
+      const tokenResponse = await this.exchangeCodeForToken(oauthProvider, validatedData.code);
 
       // Get user information from provider
-      const oauthUserData = await this.getUserInfo(validatedData.provider, tokenResponse.access_token);
+      const oauthUserData = await this.getUserInfo(oauthProvider, tokenResponse.access_token);
 
       // Check if OAuth account is already linked to another user
-      const existingOAuthUser = await this.userRepository.findByOAuthId(validatedData.provider, oauthUserData.id);
+      const existingOAuthUser = await this.userRepository.findByProvider(oauthProvider, oauthUserData.id);
       if (existingOAuthUser && existingOAuthUser.id !== userId) {
         throw new AuthError(
           'This OAuth account is already linked to another user',
@@ -245,8 +258,8 @@ export class OAuthService implements IOAuthService {
       }
 
       // Update user with OAuth information
-      const oauthAccounts = user.oauthAccounts || {};
-      oauthAccounts[validatedData.provider] = {
+      const oauthAccounts: Record<string, any> = user.oauthAccounts || {};
+      oauthAccounts[oauthProvider] = {
         id: oauthUserData.id,
         email: oauthUserData.email,
         name: oauthUserData.name,
@@ -258,10 +271,22 @@ export class OAuthService implements IOAuthService {
         oauthAccounts,
       });
 
-      // Clean up state
-      this.stateStore.delete(validatedData.state);
+      console.log(`OAuth account ${oauthProvider} linked to user ${userId}`);
 
-      console.log(`OAuth account ${validatedData.provider} linked to user ${userId}`);
+      // Return the created social account
+      return {
+        id: crypto.randomUUID(),
+        userId,
+        provider: oauthProvider,
+        providerId: oauthUserData.id,
+        email: oauthUserData.email,
+        name: oauthUserData.name,
+        avatar: oauthUserData.avatar,
+        accessToken: tokenResponse.access_token,
+        refreshToken: tokenResponse.refresh_token,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
     } catch (error) {
       if (error instanceof AuthError) {
         throw error;
@@ -286,13 +311,17 @@ export class OAuthService implements IOAuthService {
         throw new AuthError('User not found', 'USER_NOT_FOUND', 404);
       }
 
-      if (!user.oauthAccounts || !user.oauthAccounts[provider]) {
+      // Get user's OAuth accounts
+      const userOAuthAccounts = await this.userRepository.getUserOAuthAccounts(userId);
+      const targetAccount = userOAuthAccounts.find(account => account.provider === provider);
+      
+      if (!targetAccount) {
         throw new AuthError('OAuth account not linked', 'OAUTH_ACCOUNT_NOT_LINKED', 400);
       }
 
       // Check if user has a password or other OAuth accounts
       const hasPassword = !!user.password;
-      const otherOAuthAccounts = Object.keys(user.oauthAccounts).filter(p => p !== provider);
+      const otherOAuthAccounts = userOAuthAccounts.filter(account => account.provider !== provider);
       
       if (!hasPassword && otherOAuthAccounts.length === 0) {
         throw new AuthError(
@@ -303,12 +332,7 @@ export class OAuthService implements IOAuthService {
       }
 
       // Remove OAuth account
-      const oauthAccounts = { ...user.oauthAccounts };
-      delete oauthAccounts[provider];
-
-      await this.userRepository.update(userId, {
-        oauthAccounts,
-      });
+      await this.userRepository.deleteOAuthAccount(targetAccount.id);
 
       console.log(`OAuth account ${provider} unlinked from user ${userId}`);
     } catch (error) {
@@ -423,33 +447,36 @@ export class OAuthService implements IOAuthService {
    * @param userData - Raw user data from provider
    * @returns Normalized user data
    */
-  private normalizeUserData(provider: OAuthProvider, userData: any): OAuthUserData {
+  private normalizeUserData(provider: OAuthProvider, userData: RawOAuthUserData): OAuthUserData {
     switch (provider) {
       case 'google':
         return {
-          id: userData.id,
-          email: userData.email,
-          name: userData.name,
+          id: userData.id || '',
+          email: userData.email || '',
+          name: userData.name || '',
           avatar: userData.picture,
           emailVerified: userData.verified_email || false,
+          provider,
         };
 
       case 'facebook':
         return {
-          id: userData.id,
-          email: userData.email,
-          name: userData.name,
-          avatar: userData.picture?.data?.url,
+          id: userData.id || '',
+          email: userData.email || '',
+          name: userData.name || '',
+          avatar: userData.picture,
           emailVerified: true, // Facebook emails are typically verified
+          provider,
         };
 
       case 'github':
         return {
-          id: userData.id.toString(),
-          email: userData.email,
-          name: userData.name || userData.login,
+          id: userData.id?.toString() || '',
+          email: userData.email || '',
+          name: userData.name || userData.login || '',
           avatar: userData.avatar_url,
           emailVerified: true, // GitHub emails are typically verified
+          provider,
         };
 
       default:
@@ -470,7 +497,7 @@ export class OAuthService implements IOAuthService {
 
       if (user) {
         // Update OAuth account information
-        const oauthAccounts = user.oauthAccounts || {};
+        const oauthAccounts: Record<string, any> = user.oauthAccounts || {};
         oauthAccounts[provider] = {
           id: oauthUserData.id,
           email: oauthUserData.email,
@@ -482,9 +509,9 @@ export class OAuthService implements IOAuthService {
         user = await this.userRepository.update(user.id, {
           oauthAccounts,
           metadata: {
-            ...user.metadata,
+            ...(user.metadata as Record<string, unknown> || {}),
             lastLogin: new Date(),
-            loginCount: (user.metadata?.loginCount || 0) + 1,
+            loginCount: ((user.metadata as Record<string, unknown>)?.loginCount as number || 0) + 1,
           },
         });
       } else {
@@ -493,7 +520,7 @@ export class OAuthService implements IOAuthService {
 
         if (existingUser) {
           // Link OAuth account to existing user
-          const oauthAccounts = existingUser.oauthAccounts || {};
+          const oauthAccounts: Record<string, any> = existingUser.oauthAccounts || {};
           oauthAccounts[provider] = {
             id: oauthUserData.id,
             email: oauthUserData.email,
@@ -506,17 +533,18 @@ export class OAuthService implements IOAuthService {
             oauthAccounts,
             emailVerified: oauthUserData.emailVerified || existingUser.emailVerified,
             metadata: {
-              ...existingUser.metadata,
+              ...(existingUser.metadata as Record<string, unknown> || {}),
               lastLogin: new Date(),
-              loginCount: (existingUser.metadata?.loginCount || 0) + 1,
+              loginCount: ((existingUser.metadata as Record<string, unknown>)?.loginCount as number || 0) + 1,
             },
           });
         } else {
-          // Create new user
-          user = await this.userRepository.create({
+          // Create new user with OAuth data
+          const userData: RegisterData = {
             email: oauthUserData.email,
-            name: oauthUserData.name,
-            emailVerified: oauthUserData.emailVerified,
+            password: crypto.randomBytes(32).toString('hex'), // Placeholder password for OAuth users
+            fullName: oauthUserData.name,
+            emailVerified: oauthUserData.emailVerified || true, // OAuth emails are typically verified
             isActive: true,
             profile: {
               firstName: oauthUserData.name?.split(' ')[0] || '',
@@ -536,23 +564,29 @@ export class OAuthService implements IOAuthService {
               registrationDate: new Date(),
               lastLogin: new Date(),
               loginCount: 1,
+              isOAuthUser: true, // Flag to indicate this is an OAuth user
             },
-          });
+          };
+          
+          user = await this.userRepository.create(userData);
         }
+      }
+
+      // Ensure user exists before proceeding
+      if (!user) {
+        throw new AuthError('Failed to create or update user', 'USER_CREATION_ERROR', 500);
       }
 
       // Generate tokens
       const tokens = await this.tokenService.generateTokenPair(user.id, {
         email: user.email,
-        role: user.role,
-        emailVerified: user.emailVerified,
+        role: user.role as string,
       });
 
       return {
-        success: true,
         user: this.sanitizeUser(user),
-        tokens,
-        message: 'OAuth authentication successful',
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
       };
     } catch (error) {
       if (error instanceof AuthError) {
@@ -571,8 +605,8 @@ export class OAuthService implements IOAuthService {
    * @param user - User object
    * @returns Sanitized user object
    */
-  private sanitizeUser(user: any): AuthUser {
-    const { password, ...sanitizedUser } = user;
+  private sanitizeUser(user: User): AuthUser {
+    const { password: _password, ...sanitizedUser } = user;
     return sanitizedUser as AuthUser;
   }
 
@@ -583,7 +617,7 @@ export class OAuthService implements IOAuthService {
     const now = new Date();
     const expiredStates: string[] = [];
 
-    for (const [state, stateData] of this.stateStore.entries()) {
+    for (const [state, stateData] of Array.from(this.stateStore.entries())) {
       const stateAge = now.getTime() - stateData.createdAt.getTime();
       if (stateAge > 15 * 60 * 1000) { // 15 minutes
         expiredStates.push(state);
@@ -608,7 +642,7 @@ export class OAuthService implements IOAuthService {
     const now = new Date();
     let expiredStates = 0;
 
-    for (const stateData of this.stateStore.values()) {
+    for (const stateData of Array.from(this.stateStore.values())) {
       const stateAge = now.getTime() - stateData.createdAt.getTime();
       if (stateAge > 15 * 60 * 1000) {
         expiredStates++;

@@ -10,32 +10,37 @@ import {
   AuthResult, 
   AuthError,
   TokenPair,
+  TokenPayload,
   UserProfile,
   PasswordResetRequest,
-  EmailVerificationRequest
+  ChangePasswordData
 } from './types';
+import { User } from '../../database/types';
 import { 
   registerSchema, 
   loginSchema, 
   passwordResetRequestSchema, 
   passwordResetSchema,
   emailVerificationSchema,
-  profileUpdateSchema
+  profileUpdateSchema,
+  changePasswordSchema
 } from './validation';
+
+interface AuthServiceOptions {
+  requireEmailVerification: boolean;
+  enablePasswordReset: boolean;
+  maxLoginAttempts: number;
+  lockoutDuration: number; // in minutes
+  sessionDuration: number; // in minutes
+  refreshTokenDuration: number; // in days
+}
 
 interface AuthServiceConfig {
   userRepository: IUserRepository;
   tokenService: ITokenService;
   emailService: IEmailService;
   hashService: IHashService;
-  options?: {
-    requireEmailVerification?: boolean;
-    enablePasswordReset?: boolean;
-    maxLoginAttempts?: number;
-    lockoutDuration?: number; // in minutes
-    sessionDuration?: number; // in minutes
-    refreshTokenDuration?: number; // in days
-  };
+  options?: Partial<AuthServiceOptions>;
 }
 
 interface LoginAttempt {
@@ -50,7 +55,7 @@ export class AuthService implements IAuthService {
   private tokenService: ITokenService;
   private emailService: IEmailService;
   private hashService: IHashService;
-  private config: Required<AuthServiceConfig['options']>;
+  private config: AuthServiceOptions;
   private loginAttempts: Map<string, LoginAttempt> = new Map();
 
   constructor(serviceConfig: AuthServiceConfig) {
@@ -90,47 +95,42 @@ export class AuthService implements IAuthService {
       // Hash password
       const hashedPassword = await this.hashService.hashPassword(validatedData.password);
 
+      // Determine the user's name
+      const userName = validatedData.fullName || 
+        (validatedData.firstName && validatedData.lastName 
+          ? `${validatedData.firstName} ${validatedData.lastName}` 
+          : validatedData.firstName || validatedData.lastName || '');
+
       // Create user
       const newUser = await this.userRepository.create({
         email: validatedData.email,
         password: hashedPassword,
-        name: validatedData.name,
-        emailVerified: !this.config.requireEmailVerification,
+        fullName: validatedData.fullName || userName,
+        firstName: validatedData.firstName,
+        lastName: validatedData.lastName,
+        isEmailVerified: !this.config.requireEmailVerification,
         isActive: true,
-        profile: {
-          firstName: validatedData.firstName,
-          lastName: validatedData.lastName,
-          avatar: validatedData.avatar,
-        },
-        metadata: {
-          registrationDate: new Date(),
-          lastLogin: null,
-          loginCount: 0,
-        },
       });
 
       // Send verification email if required
       if (this.config.requireEmailVerification) {
-        await this.emailService.sendVerificationEmail(newUser.email);
+        const verificationToken = this.tokenService.generateAccessToken(newUser);
+        await this.emailService.sendVerificationEmail(newUser.email, verificationToken);
       } else {
         // Send welcome email if verification is not required
-        await this.emailService.sendWelcomeEmail(newUser.email, newUser.name);
+        await this.emailService.sendWelcomeEmail(newUser.email, newUser.fullName || newUser.firstName || 'User');
       }
 
       // Generate tokens
       const tokens = await this.tokenService.generateTokenPair(newUser.id, {
         email: newUser.email,
-        role: newUser.role,
-        emailVerified: newUser.emailVerified,
+        role: typeof newUser.role === 'string' ? newUser.role : undefined,
       });
 
       return {
-        success: true,
         user: this.sanitizeUser(newUser),
-        tokens,
-        message: this.config.requireEmailVerification 
-          ? 'Registration successful. Please check your email to verify your account.'
-          : 'Registration successful. Welcome!',
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
       };
     } catch (error) {
       if (error instanceof AuthError) {
@@ -169,6 +169,11 @@ export class AuthService implements IAuthService {
         throw new AuthError('Account is deactivated', 'ACCOUNT_DEACTIVATED', 403);
       }
 
+      // Check if user has a password (OAuth users might not have one)
+      if (!user.password) {
+        throw new AuthError('This account was created with social login. Please use social login to access your account.', 'NO_PASSWORD', 400);
+      }
+
       // Verify password
       const isPasswordValid = await this.hashService.comparePassword(
         validatedCredentials.password,
@@ -193,26 +198,25 @@ export class AuthService implements IAuthService {
       this.loginAttempts.delete(validatedCredentials.email);
 
       // Update user login metadata
+      const currentMetadata = (user.metadata as Record<string, unknown>) || {};
       await this.userRepository.update(user.id, {
         metadata: {
-          ...user.metadata,
+          ...currentMetadata,
           lastLogin: new Date(),
-          loginCount: (user.metadata?.loginCount || 0) + 1,
+          loginCount: ((currentMetadata.loginCount as number) || 0) + 1,
         },
       });
 
       // Generate tokens
       const tokens = await this.tokenService.generateTokenPair(user.id, {
         email: user.email,
-        role: user.role,
-        emailVerified: user.emailVerified,
+        role: typeof user.role === 'string' ? user.role : undefined,
       });
 
       return {
-        success: true,
         user: this.sanitizeUser(user),
-        tokens,
-        message: 'Login successful',
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
       };
     } catch (error) {
       if (error instanceof AuthError) {
@@ -259,7 +263,7 @@ export class AuthService implements IAuthService {
   async refreshToken(refreshToken: string): Promise<TokenPair> {
     try {
       // Verify refresh token
-      const tokenData = await this.tokenService.verifyToken(refreshToken, 'refresh');
+      const tokenData = this.tokenService.verifyToken(refreshToken);
       
       // Get user data
       const user = await this.userRepository.findById(tokenData.userId);
@@ -270,8 +274,7 @@ export class AuthService implements IAuthService {
       // Generate new token pair
       const tokens = await this.tokenService.generateTokenPair(user.id, {
         email: user.email,
-        role: user.role,
-        emailVerified: user.emailVerified,
+        role: typeof user.role === 'string' ? user.role : undefined,
       });
 
       // Revoke old refresh token
@@ -292,44 +295,47 @@ export class AuthService implements IAuthService {
 
   /**
    * Verify email address
-   * @param request - Email verification request
+   * @param token - Email verification token
    */
-  async verifyEmail(request: EmailVerificationRequest): Promise<void> {
+  async verifyEmail(token: string): Promise<boolean> {
     try {
       // Validate input
-      const validatedRequest = emailVerificationSchema.parse(request);
+      const validatedRequest = emailVerificationSchema.parse({ token });
 
       // Verify email token
-      const tokenData = this.emailService.verifyEmailToken(validatedRequest.token, 'verification');
+      const tokenData = await this.emailService.verifyEmailToken(validatedRequest.token, 'verification');
 
       // Find user by email
       const user = await this.userRepository.findByEmail(tokenData.email);
       if (!user) {
-        throw new AuthError('User not found', 'USER_NOT_FOUND', 404);
+        return false;
       }
 
       // Update user email verification status
       await this.userRepository.update(user.id, {
-        emailVerified: true,
-        emailVerifiedAt: new Date(),
+        isEmailVerified: true,
       });
 
-      // Mark token as used
-      this.emailService.markTokenAsUsed(validatedRequest.token);
-
       // Send welcome email
-      await this.emailService.sendWelcomeEmail(user.email, user.name);
+      await this.emailService.sendWelcomeEmail(user.email, user.fullName || user.firstName || 'User');
 
       console.log(`Email verified for user: ${user.email}`);
+      return true;
     } catch (error) {
-      if (error instanceof AuthError) {
-        throw error;
-      }
-      throw new AuthError(
-        `Email verification failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        'EMAIL_VERIFICATION_ERROR',
-        500
-      );
+      console.error(`Email verification failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      return false;
+    }
+  }
+
+  /**
+   * Validate token
+   * @param token - Token to validate
+   */
+  async validateToken(token: string): Promise<TokenPayload> {
+    try {
+      return this.tokenService.verifyToken(token);
+    } catch (_error) {
+      throw new AuthError('Invalid token', 'INVALID_TOKEN', 401);
     }
   }
 
@@ -354,8 +360,11 @@ export class AuthService implements IAuthService {
         return;
       }
 
+      // Generate password reset token
+      const resetToken = await this.tokenService.generateAccessToken(user);
+      
       // Send password reset email
-      await this.emailService.sendPasswordResetEmail(user.email);
+      await this.emailService.sendPasswordResetEmail(user.email, resetToken);
 
       console.log(`Password reset email sent to: ${user.email}`);
     } catch (error) {
@@ -378,10 +387,10 @@ export class AuthService implements IAuthService {
   async resetPassword(token: string, newPassword: string): Promise<void> {
     try {
       // Validate input
-      const validatedData = passwordResetSchema.parse({ token, newPassword });
+      const validatedData = passwordResetSchema.parse({ token, password: newPassword });
 
       // Verify reset token
-      const tokenData = this.emailService.verifyEmailToken(validatedData.token, 'password-reset');
+      const tokenData = await this.emailService.verifyEmailToken(validatedData.token, 'password-reset');
 
       // Find user by email
       const user = await this.userRepository.findByEmail(tokenData.email);
@@ -390,7 +399,7 @@ export class AuthService implements IAuthService {
       }
 
       // Hash new password
-      const hashedPassword = await this.hashService.hashPassword(validatedData.newPassword);
+      const hashedPassword = await this.hashService.hashPassword(validatedData.password);
 
       // Update user password
       await this.userRepository.update(user.id, {
@@ -398,8 +407,8 @@ export class AuthService implements IAuthService {
         passwordChangedAt: new Date(),
       });
 
-      // Mark token as used
-      this.emailService.markTokenAsUsed(validatedData.token);
+      // Token validation and usage should be handled by the token service
+      // await this.tokenService.revokeToken(validatedData.token);
 
       // Revoke all user tokens to force re-login
       // await this.tokenService.revokeAllUserTokens(user.id);
@@ -420,29 +429,35 @@ export class AuthService implements IAuthService {
   /**
    * Change user password (authenticated)
    * @param userId - User ID
-   * @param currentPassword - Current password
-   * @param newPassword - New password
+   * @param data - Change password data
    */
-  async changePassword(userId: string, currentPassword: string, newPassword: string): Promise<void> {
+  async changePassword(userId: string, data: ChangePasswordData): Promise<void> {
     try {
+      const validatedData = changePasswordSchema.parse(data);
+      
       // Find user
       const user = await this.userRepository.findById(userId);
       if (!user) {
         throw new AuthError('User not found', 'USER_NOT_FOUND', 404);
       }
 
+      // Check if user has a password (OAuth users might not have one)
+      if (!user.password) {
+        throw new AuthError('This account was created with social login and does not have a password to change.', 'NO_PASSWORD', 400);
+      }
+
       // Verify current password
-      const isCurrentPasswordValid = await this.hashService.comparePassword(
-        currentPassword,
-        user.password
-      );
+        const isCurrentPasswordValid = await this.hashService.comparePassword(
+          validatedData.oldPassword,
+          user.password
+        );
 
       if (!isCurrentPasswordValid) {
         throw new AuthError('Current password is incorrect', 'INVALID_PASSWORD', 400);
       }
 
       // Hash new password
-      const hashedPassword = await this.hashService.hashPassword(newPassword);
+      const hashedPassword = await this.hashService.hashPassword(validatedData.newPassword);
 
       // Update user password
       await this.userRepository.update(userId, {
@@ -480,16 +495,27 @@ export class AuthService implements IAuthService {
         throw new AuthError('User not found', 'USER_NOT_FOUND', 404);
       }
 
+      // Determine the user's name from validated data
+      const userName = validatedData.fullName || 
+        (validatedData.firstName && validatedData.lastName 
+          ? `${validatedData.firstName} ${validatedData.lastName}` 
+          : user.fullName || `${user.firstName || ''} ${user.lastName || ''}`.trim());
+
       // Update user profile
       const updatedUser = await this.userRepository.update(userId, {
-        name: validatedData.name || user.name,
-        profile: {
-          ...user.profile,
-          ...validatedData,
-        },
+        fullName: validatedData.fullName || userName,
+        firstName: validatedData.firstName || user.firstName,
+        lastName: validatedData.lastName || user.lastName,
+        avatar: validatedData.avatar || user.avatar,
+        bio: validatedData.bio || user.bio,
+        phone: validatedData.phone || user.phone,
       });
 
-      return this.sanitizeUser(updatedUser);
+      if (!updatedUser) {
+        throw new AuthError('Failed to update user profile', 'PROFILE_UPDATE_ERROR', 500);
+      }
+
+      return this.sanitizeUser(updatedUser!);
     } catch (error) {
       if (error instanceof AuthError) {
         throw error;
@@ -609,8 +635,8 @@ export class AuthService implements IAuthService {
    * @param user - User object
    * @returns Sanitized user object
    */
-  private sanitizeUser(user: any): AuthUser {
-    const { password, ...sanitizedUser } = user;
+  private sanitizeUser(user: User): AuthUser {
+    const { password: _password, ...sanitizedUser } = user;
     return sanitizedUser as AuthUser;
   }
 
@@ -621,7 +647,7 @@ export class AuthService implements IAuthService {
     const now = new Date();
     const expiredEmails: string[] = [];
 
-    for (const [email, attempt] of this.loginAttempts.entries()) {
+    for (const [email, attempt] of Array.from(this.loginAttempts.entries())) {
       if (attempt.lockedUntil && attempt.lockedUntil <= now) {
         expiredEmails.push(email);
       }
@@ -645,7 +671,7 @@ export class AuthService implements IAuthService {
     const now = new Date();
     let lockedAccounts = 0;
 
-    for (const attempt of this.loginAttempts.values()) {
+    for (const attempt of Array.from(this.loginAttempts.values())) {
       if (attempt.lockedUntil && attempt.lockedUntil > now) {
         lockedAccounts++;
       }

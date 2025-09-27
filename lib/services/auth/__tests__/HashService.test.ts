@@ -194,9 +194,9 @@ describe('HashService', () => {
   describe('error handling', () => {
     it('should handle bcrypt errors gracefully', async () => {
       // Mock bcrypt to throw an error
-      const originalBcrypt = require('bcrypt');
+      const bcrypt = await import('bcrypt');
       jest.doMock('bcrypt', () => ({
-        ...originalBcrypt,
+        ...bcrypt,
         hash: jest.fn().mockRejectedValue(new Error('Bcrypt error')),
       }));
 
@@ -208,9 +208,9 @@ describe('HashService', () => {
       const hashedPassword = await hashService.hashPassword(password);
       
       // Mock bcrypt compare to throw an error
-      const originalBcrypt = require('bcrypt');
+      const bcrypt = await import('bcrypt');
       jest.doMock('bcrypt', () => ({
-        ...originalBcrypt,
+        ...bcrypt,
         compare: jest.fn().mockRejectedValue(new Error('Bcrypt compare error')),
       }));
 

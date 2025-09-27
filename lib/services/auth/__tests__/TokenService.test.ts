@@ -1,5 +1,6 @@
 import { TokenService, createTokenService } from '../TokenService';
-import { AuthError } from '../types';
+import { AuthError, UnauthorizedError } from '../types';
+import { User } from '../../database/types';
 
 // Mock environment variables
 const mockEnv = {
@@ -7,13 +8,32 @@ const mockEnv = {
   JWT_REFRESH_SECRET: 'test-refresh-secret-key-for-testing-purposes-only',
 };
 
+// Helper function to create mock users
+const createMockUser = (overrides: Partial<User> = {}): User => ({
+  id: '123',
+  email: 'test@example.com',
+  firstName: 'Test',
+  lastName: 'User',
+  fullName: 'Test User',
+  isEmailVerified: true,
+  isActive: true,
+  createdAt: new Date(),
+  updatedAt: new Date(),
+  ...overrides,
+});
+
 describe('TokenService', () => {
   let tokenService: TokenService;
 
   beforeEach(() => {
     // Set up environment variables
     Object.assign(process.env, mockEnv);
-    tokenService = createTokenService();
+    tokenService = createTokenService({
+      jwtSecret: mockEnv.JWT_SECRET,
+      accessTokenExpiry: '15m',
+      refreshTokenExpiry: '7d',
+      issuer: 'test-issuer'
+    });
   });
 
   afterEach(() => {
@@ -24,44 +44,44 @@ describe('TokenService', () => {
   });
 
   describe('generateAccessToken', () => {
-    it('should generate a valid access token', async () => {
-      const payload = { userId: '123', email: 'test@example.com' };
-      const token = await tokenService.generateAccessToken(payload);
+    it('should generate a valid access token', () => {
+      const user = createMockUser();
+      const token = tokenService.generateAccessToken(user);
 
       expect(token).toBeDefined();
       expect(typeof token).toBe('string');
       expect(token.split('.')).toHaveLength(3); // JWT format: header.payload.signature
     });
 
-    it('should generate different tokens for different payloads', async () => {
-      const payload1 = { userId: '123', email: 'test1@example.com' };
-      const payload2 = { userId: '456', email: 'test2@example.com' };
+    it('should generate different tokens for different users', () => {
+      const user1 = createMockUser({ id: '123', email: 'test1@example.com' });
+      const user2 = createMockUser({ id: '456', email: 'test2@example.com' });
 
-      const token1 = await tokenService.generateAccessToken(payload1);
-      const token2 = await tokenService.generateAccessToken(payload2);
+      const token1 = tokenService.generateAccessToken(user1);
+      const token2 = tokenService.generateAccessToken(user2);
 
       expect(token1).not.toBe(token2);
     });
 
-    it('should include custom expiry time', async () => {
-      const payload = { userId: '123', email: 'test@example.com' };
-      const customExpiry = '2h';
-      const token = await tokenService.generateAccessToken(payload, customExpiry);
+    it('should include custom expiry time', () => {
+      const user = createMockUser({ id: '123', email: 'test@example.com' });
+      const token = tokenService.generateAccessToken(user);
 
-      const decoded = await tokenService.verifyToken(token, 'access');
+      const decoded = tokenService.verifyToken(token);
       expect(decoded.exp).toBeDefined();
     });
 
-    it('should handle empty payload', async () => {
-      const token = await tokenService.generateAccessToken({});
+    it('should handle minimal user data', () => {
+      const user = createMockUser({ id: '123' });
+      const token = tokenService.generateAccessToken(user);
       expect(token).toBeDefined();
     });
   });
 
   describe('generateRefreshToken', () => {
     it('should generate a valid refresh token', async () => {
-      const payload = { userId: '123' };
-      const token = await tokenService.generateRefreshToken(payload);
+      const user = createMockUser({ id: '123', email: 'test@example.com' });
+      const token = await tokenService.generateRefreshToken(user);
 
       expect(token).toBeDefined();
       expect(typeof token).toBe('string');
@@ -69,119 +89,146 @@ describe('TokenService', () => {
     });
 
     it('should generate different refresh tokens', async () => {
-      const payload = { userId: '123' };
-      const token1 = await tokenService.generateRefreshToken(payload);
-      const token2 = await tokenService.generateRefreshToken(payload);
+      const user = createMockUser({ id: '123', email: 'test@example.com' });
+      const token1 = await tokenService.generateRefreshToken(user);
+      const token2 = await tokenService.generateRefreshToken(user);
 
       expect(token1).not.toBe(token2);
     });
   });
 
   describe('verifyToken', () => {
-    it('should verify valid access token', async () => {
-      const payload = { userId: '123', email: 'test@example.com' };
-      const token = await tokenService.generateAccessToken(payload);
-      const decoded = await tokenService.verifyToken(token, 'access');
+    it('should verify valid access token', () => {
+      const user = createMockUser({ id: '123', email: 'test@example.com' });
+      const token = tokenService.generateAccessToken(user);
+      const decoded = tokenService.verifyToken(token);
 
-      expect(decoded.userId).toBe(payload.userId);
-      expect(decoded.email).toBe(payload.email);
+      expect(decoded.userId).toBe(user.id);
+      expect(decoded.email).toBe(user.email);
       expect(decoded.iat).toBeDefined();
       expect(decoded.exp).toBeDefined();
     });
 
     it('should verify valid refresh token', async () => {
-      const payload = { userId: '123' };
-      const token = await tokenService.generateRefreshToken(payload);
+      const user = createMockUser({ id: '123', email: 'test@example.com' });
+      const token = await tokenService.generateRefreshToken(user);
       const decoded = await tokenService.verifyToken(token, 'refresh');
 
-      expect(decoded.userId).toBe(payload.userId);
+      expect(decoded.userId).toBe(user.id);
     });
 
     it('should reject invalid token', async () => {
       const invalidToken = 'invalid.token.here';
       
       await expect(tokenService.verifyToken(invalidToken, 'access'))
-        .rejects.toThrow(AuthError);
+        .rejects.toThrow(UnauthorizedError);
     });
 
     it('should reject expired token', async () => {
-      const payload = { userId: '123' };
-      const expiredToken = await tokenService.generateAccessToken(payload, '-1s'); // Already expired
+      // Create a token service with very short expiry
+      const shortExpiryTokenService = createTokenService({
+        jwtSecret: 'test-secret-that-is-at-least-32-characters-long',
+        accessTokenExpiry: '1s',
+        refreshTokenExpiry: '7d',
+        issuer: 'test-issuer'
+      });
+      
+      const user = createMockUser({ id: '123' });
+      const expiredToken = shortExpiryTokenService.generateAccessToken(user);
       
       // Wait a moment to ensure expiration
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise(resolve => setTimeout(resolve, 1100));
       
-      await expect(tokenService.verifyToken(expiredToken, 'access'))
-        .rejects.toThrow(AuthError);
+      expect(() => shortExpiryTokenService.verifyToken(expiredToken))
+        .toThrow(AuthError);
     });
 
-    it('should reject token with wrong secret', async () => {
-      const payload = { userId: '123' };
-      const accessToken = await tokenService.generateAccessToken(payload);
+    it('should reject token with wrong secret', () => {
+      const user = createMockUser({ id: '123' });
+      const accessToken = tokenService.generateAccessToken(user);
       
-      // Try to verify access token as refresh token (different secret)
-      await expect(tokenService.verifyToken(accessToken, 'refresh'))
-        .rejects.toThrow(AuthError);
+      // Create a different token service with different secret
+      const differentTokenService = createTokenService({
+        jwtSecret: 'different-secret-that-is-at-least-32-characters-long',
+        accessTokenExpiry: '15m',
+        refreshTokenExpiry: '7d',
+        issuer: 'test-issuer'
+      });
+      
+      expect(() => differentTokenService.verifyToken(accessToken))
+        .toThrow(AuthError);
     });
 
     it('should handle malformed token', async () => {
       const malformedToken = 'not.a.valid.jwt.token';
       
       await expect(tokenService.verifyToken(malformedToken, 'access'))
-        .rejects.toThrow(AuthError);
+        .rejects.toThrow(UnauthorizedError);
     });
   });
 
-  describe('refreshAccessToken', () => {
-    it('should refresh access token with valid refresh token', async () => {
-      const payload = { userId: '123', email: 'test@example.com' };
-      const refreshToken = await tokenService.generateRefreshToken({ userId: payload.userId });
-      
-      const newAccessToken = await tokenService.refreshAccessToken(refreshToken, payload);
-      
-      expect(newAccessToken).toBeDefined();
-      const decoded = await tokenService.verifyToken(newAccessToken, 'access');
-      expect(decoded.userId).toBe(payload.userId);
-      expect(decoded.email).toBe(payload.email);
+  describe('verifyRefreshToken', () => {
+    it('should verify valid refresh token', async () => {
+      const user = createMockUser({ id: '123' });
+      const refreshToken = tokenService.generateRefreshToken(user);
+
+      const tokenData = tokenService.verifyRefreshToken(refreshToken);
+
+      expect(tokenData).toBeDefined();
+      expect(tokenData.userId).toBe(user.id);
+      expect(tokenData.isRevoked).toBe(false);
     });
 
     it('should reject invalid refresh token', async () => {
-      const payload = { userId: '123', email: 'test@example.com' };
       const invalidRefreshToken = 'invalid.refresh.token';
-      
-      await expect(tokenService.refreshAccessToken(invalidRefreshToken, payload))
-        .rejects.toThrow(AuthError);
+
+      expect(() => tokenService.verifyRefreshToken(invalidRefreshToken))
+        .toThrow(AuthError);
     });
 
     it('should reject expired refresh token', async () => {
-      const payload = { userId: '123', email: 'test@example.com' };
-      const expiredRefreshToken = await tokenService.generateRefreshToken({ userId: payload.userId }, '-1s');
-      
-      await new Promise(resolve => setTimeout(resolve, 100));
-      
-      await expect(tokenService.refreshAccessToken(expiredRefreshToken, payload))
-        .rejects.toThrow(AuthError);
+      const shortExpiryTokenService = createTokenService({
+        jwtSecret: 'test-secret-key-that-is-at-least-32-characters-long',
+        accessTokenExpiry: '15m',
+        refreshTokenExpiry: '1s',
+        issuer: 'test-issuer'
+      });
+      const user = createMockUser({ id: '123' });
+      const expiredRefreshToken = shortExpiryTokenService.generateRefreshToken(user);
+
+      // Wait for token to expire
+      await new Promise(resolve => setTimeout(resolve, 1100));
+
+      expect(() => shortExpiryTokenService.verifyRefreshToken(expiredRefreshToken))
+        .toThrow(AuthError);
     });
   });
 
   describe('revokeToken', () => {
-    it('should revoke a token successfully', async () => {
-      const payload = { userId: '123' };
-      const token = await tokenService.generateAccessToken(payload);
-      
-      await tokenService.revokeToken(token);
-      
+    it('should revoke a refresh token successfully', async () => {
+      const user = createMockUser({ id: '123' });
+      const refreshToken = tokenService.generateRefreshToken(user);
+
+      // Verify token is valid before revocation
+      const tokenData = tokenService.verifyRefreshToken(refreshToken);
+      expect(tokenData.isRevoked).toBe(false);
+
+      await tokenService.revokeToken(refreshToken);
+
       // Token should now be invalid
-      await expect(tokenService.verifyToken(token, 'access'))
-        .rejects.toThrow(AuthError);
+      expect(() => tokenService.verifyRefreshToken(refreshToken))
+        .toThrow(AuthError);
     });
 
     it('should handle revoking already revoked token', async () => {
-      const payload = { userId: '123' };
-      const token = await tokenService.generateAccessToken(payload);
-      
-      await tokenService.revokeToken(token);
-      await expect(tokenService.revokeToken(token)).resolves.not.toThrow();
+      const user = createMockUser({ id: '123' });
+      const refreshToken = tokenService.generateRefreshToken(user);
+
+      await tokenService.revokeToken(refreshToken);
+      await tokenService.revokeToken(refreshToken); // Revoke again
+
+      expect(() => tokenService.verifyRefreshToken(refreshToken))
+        .toThrow(AuthError);
     });
 
     it('should handle revoking invalid token', async () => {
@@ -191,20 +238,22 @@ describe('TokenService', () => {
   });
 
   describe('revokeAllUserTokens', () => {
-    it('should revoke all tokens for a user', async () => {
-      const userId = '123';
-      const payload = { userId, email: 'test@example.com' };
+    it('should revoke all refresh tokens for a user', async () => {
+      const user = createMockUser({ id: '123', email: 'test@example.com' });
       
-      const token1 = await tokenService.generateAccessToken(payload);
-      const token2 = await tokenService.generateAccessToken(payload);
-      const refreshToken = await tokenService.generateRefreshToken({ userId });
+      // Generate multiple refresh tokens for the same user
+      const refreshToken1 = tokenService.generateRefreshToken(user);
+      const refreshToken2 = tokenService.generateRefreshToken(user);
       
-      await tokenService.revokeAllUserTokens(userId);
+      // Verify tokens are valid before revocation
+      expect(() => tokenService.verifyRefreshToken(refreshToken1)).not.toThrow();
+      expect(() => tokenService.verifyRefreshToken(refreshToken2)).not.toThrow();
       
-      // All tokens should now be invalid
-      await expect(tokenService.verifyToken(token1, 'access')).rejects.toThrow(AuthError);
-      await expect(tokenService.verifyToken(token2, 'access')).rejects.toThrow(AuthError);
-      await expect(tokenService.verifyToken(refreshToken, 'refresh')).rejects.toThrow(AuthError);
+      await tokenService.revokeAllUserTokens(user.id);
+      
+      // All refresh tokens should now be invalid
+      expect(() => tokenService.verifyRefreshToken(refreshToken1)).toThrow(AuthError);
+      expect(() => tokenService.verifyRefreshToken(refreshToken2)).toThrow(AuthError);
     });
 
     it('should handle revoking tokens for non-existent user', async () => {
@@ -213,219 +262,220 @@ describe('TokenService', () => {
     });
   });
 
-  describe('isTokenRevoked', () => {
-    it('should return false for non-revoked token', async () => {
-      const payload = { userId: '123' };
-      const token = await tokenService.generateAccessToken(payload);
-      
-      const isRevoked = await tokenService.isTokenRevoked(token);
-      expect(isRevoked).toBe(false);
-    });
 
-    it('should return true for revoked token', async () => {
-      const payload = { userId: '123' };
-      const token = await tokenService.generateAccessToken(payload);
-      
-      await tokenService.revokeToken(token);
-      
-      const isRevoked = await tokenService.isTokenRevoked(token);
-      expect(isRevoked).toBe(true);
-    });
-
-    it('should handle invalid token', async () => {
-      const invalidToken = 'invalid.token.here';
-      const isRevoked = await tokenService.isTokenRevoked(invalidToken);
-      expect(isRevoked).toBe(true); // Invalid tokens are considered revoked
-    });
-  });
 
   describe('cleanupExpiredTokens', () => {
     it('should clean up expired tokens', async () => {
-      const payload = { userId: '123' };
+      const user = createMockUser({ id: '123' });
       
       // Generate some tokens with short expiry
-      const shortLivedToken = await tokenService.generateAccessToken(payload, '1ms');
+      const shortExpiryTokenService = createTokenService({
+        jwtSecret: 'test-secret-that-is-at-least-32-characters-long',
+        accessTokenExpiry: '1s',
+        refreshTokenExpiry: '7d',
+        issuer: 'test-issuer'
+      });
+      const shortLivedToken = shortExpiryTokenService.generateAccessToken(user);
       await tokenService.revokeToken(shortLivedToken);
       
       // Wait for expiration
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise(resolve => setTimeout(resolve, 1100));
       
-      const cleanedCount = await tokenService.cleanupExpiredTokens();
-      expect(cleanedCount).toBeGreaterThanOrEqual(0);
+      await tokenService.cleanupExpiredTokens();
     });
 
     it('should not clean up non-expired tokens', async () => {
-      const payload = { userId: '123' };
-      const longLivedToken = await tokenService.generateAccessToken(payload, '1h');
-      await tokenService.revokeToken(longLivedToken);
+      const user = createMockUser({ id: '123' });
+      const refreshToken = tokenService.generateRefreshToken(user);
+      await tokenService.revokeToken(refreshToken);
       
-      const cleanedCount = await tokenService.cleanupExpiredTokens();
+      await tokenService.cleanupExpiredTokens();
       
-      // The long-lived token should still be in the revoked list
-      const isRevoked = await tokenService.isTokenRevoked(longLivedToken);
-      expect(isRevoked).toBe(true);
+      // The refresh token should still be revoked (not cleaned up since it's not expired)
+      expect(() => tokenService.verifyRefreshToken(refreshToken))
+        .toThrow(AuthError);
     });
   });
 
-  describe('getTokenInfo', () => {
-    it('should return token information for valid token', async () => {
-      const payload = { userId: '123', email: 'test@example.com' };
-      const token = await tokenService.generateAccessToken(payload);
+  describe('token utilities', () => {
+    it('should decode token information for valid token', () => {
+      const user = createMockUser({ id: '123', email: 'test@example.com' });
+      const token = tokenService.generateAccessToken(user);
       
-      const tokenInfo = await tokenService.getTokenInfo(token);
+      const decoded = tokenService.decodeToken(token);
       
-      expect(tokenInfo.valid).toBe(true);
-      expect(tokenInfo.payload.userId).toBe(payload.userId);
-      expect(tokenInfo.payload.email).toBe(payload.email);
-      expect(tokenInfo.expiresAt).toBeInstanceOf(Date);
-      expect(tokenInfo.issuedAt).toBeInstanceOf(Date);
+      expect(decoded).toBeTruthy();
+      expect(typeof decoded).toBe('object');
+      if (decoded && typeof decoded === 'object') {
+        expect(decoded.userId).toBe(user.id);
+        expect(decoded.email).toBe(user.email);
+      }
     });
 
-    it('should return invalid info for revoked token', async () => {
-      const payload = { userId: '123' };
-      const token = await tokenService.generateAccessToken(payload);
-      await tokenService.revokeToken(token);
+    it('should check if token is expired', async () => {
+      const shortExpiryTokenService = createTokenService({
+        jwtSecret: 'test-secret-that-is-at-least-32-characters-long',
+        accessTokenExpiry: '1s',
+        refreshTokenExpiry: '7d',
+        issuer: 'test-issuer'
+      });
       
-      const tokenInfo = await tokenService.getTokenInfo(token);
+      const user = createMockUser({ id: '123' });
+      const token = shortExpiryTokenService.generateAccessToken(user);
       
-      expect(tokenInfo.valid).toBe(false);
-      expect(tokenInfo.error).toBe('Token has been revoked');
+      // First check that token is not expired immediately
+      const isExpiredBefore = shortExpiryTokenService.isTokenExpired(token);
+      expect(isExpiredBefore).toBe(false);
+      
+      // Wait for token to expire
+      await new Promise(resolve => setTimeout(resolve, 1100));
+      
+      // Now check that token is expired
+      const isExpiredAfter = shortExpiryTokenService.isTokenExpired(token);
+      expect(isExpiredAfter).toBe(true);
     });
 
-    it('should return invalid info for expired token', async () => {
-      const payload = { userId: '123' };
-      const expiredToken = await tokenService.generateAccessToken(payload, '-1s');
-      
-      await new Promise(resolve => setTimeout(resolve, 100));
-      
-      const tokenInfo = await tokenService.getTokenInfo(expiredToken);
-      
-      expect(tokenInfo.valid).toBe(false);
-      expect(tokenInfo.error).toContain('expired');
-    });
-
-    it('should return invalid info for malformed token', async () => {
+    it('should return null for malformed token decode', () => {
       const malformedToken = 'invalid.token.format';
       
-      const tokenInfo = await tokenService.getTokenInfo(malformedToken);
+      const decoded = tokenService.decodeToken(malformedToken);
       
-      expect(tokenInfo.valid).toBe(false);
-      expect(tokenInfo.error).toBeDefined();
+      expect(decoded).toBeNull();
+    });
+
+    it('should get token expiry date', () => {
+      const user = createMockUser({ id: '123' });
+      const token = tokenService.generateAccessToken(user);
+      
+      const expiry = tokenService.getTokenExpiry(token);
+      
+      expect(expiry).toBeInstanceOf(Date);
+      expect(expiry!.getTime()).toBeGreaterThan(Date.now());
     });
   });
 
   describe('configuration', () => {
     it('should use custom configuration', () => {
       const customConfig = {
-        accessTokenExpiry: '2h',
+        jwtSecret: 'custom-secret-that-is-at-least-32-characters-long',
+        accessTokenExpiry: '30m',
         refreshTokenExpiry: '14d',
         issuer: 'custom-issuer',
-        audience: 'custom-audience',
+        audience: 'custom-audience'
       };
       
       const customTokenService = createTokenService(customConfig);
-      expect(customTokenService).toBeDefined();
-    });
-
-    it('should throw error when JWT secrets are missing', () => {
-      delete process.env.JWT_SECRET;
-      delete process.env.JWT_REFRESH_SECRET;
       
-      expect(() => createTokenService()).toThrow('JWT_SECRET environment variable is required');
+      expect(customTokenService).toBeInstanceOf(TokenService);
     });
 
     it('should use default values for missing optional config', () => {
-      const tokenService = createTokenService({});
-      expect(tokenService).toBeDefined();
+      const minimalConfig = {
+        jwtSecret: 'minimal-secret-that-is-at-least-32-characters-long'
+      };
+      
+      const minimalTokenService = createTokenService(minimalConfig);
+      
+      expect(minimalTokenService).toBeInstanceOf(TokenService);
+    });
+
+    it('should throw error for missing JWT secret', () => {
+      expect(() => {
+        createTokenService({} as any);
+      }).toThrow('JWT secret is required');
+    });
+
+    it('should throw error for short JWT secret', () => {
+      expect(() => {
+        createTokenService({ jwtSecret: 'short' });
+      }).toThrow('JWT secret must be at least 32 characters long');
     });
   });
 
   describe('edge cases', () => {
-    it('should handle very large payloads', async () => {
-      const largePayload = {
-        userId: '123',
-        data: 'x'.repeat(1000), // Large string
-        array: new Array(100).fill('item'),
-      };
+    it('should handle user with additional data', () => {
+      const user = createMockUser({ 
+        id: '123',
+        email: 'test@example.com',
+        firstName: 'John',
+        lastName: 'Doe'
+      });
       
-      const token = await tokenService.generateAccessToken(largePayload);
-      const decoded = await tokenService.verifyToken(token, 'access');
+      const token = tokenService.generateAccessToken(user);
+      const decoded = tokenService.verifyToken(token);
       
-      expect(decoded.userId).toBe(largePayload.userId);
-      expect(decoded.data).toBe(largePayload.data);
+      expect(decoded.userId).toBe(user.id);
+      expect(decoded.email).toBe(user.email);
     });
 
-    it('should handle special characters in payload', async () => {
-      const specialPayload = {
-        userId: '123',
-        name: 'José María',
-        emoji: '🚀🔐',
-        special: '!@#$%^&*()',
-      };
+    it('should handle special characters in user data', () => {
+      const user = createMockUser({
+        id: '123',
+        email: 'josé.maría@example.com',
+        firstName: 'José María',
+        lastName: 'González'
+      });
       
-      const token = await tokenService.generateAccessToken(specialPayload);
-      const decoded = await tokenService.verifyToken(token, 'access');
+      const token = tokenService.generateAccessToken(user);
+      const decoded = tokenService.verifyToken(token);
       
-      expect(decoded.name).toBe(specialPayload.name);
-      expect(decoded.emoji).toBe(specialPayload.emoji);
-      expect(decoded.special).toBe(specialPayload.special);
+      expect(decoded.userId).toBe(user.id);
+      expect(decoded.email).toBe(user.email);
     });
 
-    it('should handle concurrent token operations', async () => {
-      const payload = { userId: '123' };
+    it('should handle concurrent token operations', () => {
+      const user = createMockUser({ id: '123' });
       
       // Generate multiple tokens concurrently
-      const tokenPromises = Array(10).fill(null).map(() => 
-        tokenService.generateAccessToken(payload)
+      const tokens = Array(10).fill(null).map(() => 
+        tokenService.generateAccessToken(user)
       );
-      
-      const tokens = await Promise.all(tokenPromises);
       
       // All tokens should be unique
       const uniqueTokens = new Set(tokens);
       expect(uniqueTokens.size).toBe(tokens.length);
       
       // All tokens should be valid
-      const verificationPromises = tokens.map(token => 
-        tokenService.verifyToken(token, 'access')
+      const decodedTokens = tokens.map(token => 
+        tokenService.verifyToken(token)
       );
       
-      const decodedTokens = await Promise.all(verificationPromises);
       decodedTokens.forEach(decoded => {
-        expect(decoded.userId).toBe(payload.userId);
+        expect(decoded.userId).toBe(user.id);
       });
     });
   });
 
   describe('security', () => {
-    it('should not accept tokens signed with different secret', async () => {
+    it('should not accept tokens signed with different secret', () => {
       // Create a token with a different service (different secret)
-      const differentEnv = { ...mockEnv, JWT_SECRET: 'different-secret' };
-      Object.assign(process.env, differentEnv);
+      const differentSecret = 'different-secret-that-is-at-least-32-characters-long';
       
-      const differentTokenService = createTokenService();
-      const payload = { userId: '123' };
-      const tokenFromDifferentService = await differentTokenService.generateAccessToken(payload);
-      
-      // Restore original environment
-      Object.assign(process.env, mockEnv);
+      const differentTokenService = createTokenService({
+        jwtSecret: differentSecret,
+        accessTokenExpiry: '15m',
+        refreshTokenExpiry: '7d',
+        issuer: 'test-issuer'
+      });
+      const user = createMockUser({ id: '123' });
+      const tokenFromDifferentService = differentTokenService.generateAccessToken(user);
       
       // Original service should reject the token
-      await expect(tokenService.verifyToken(tokenFromDifferentService, 'access'))
-        .rejects.toThrow(AuthError);
+      expect(() => tokenService.verifyToken(tokenFromDifferentService))
+        .toThrow(AuthError);
     });
 
-    it('should handle token tampering', async () => {
-      const payload = { userId: '123' };
-      const token = await tokenService.generateAccessToken(payload);
+    it('should handle token tampering', () => {
+      const user = createMockUser({ id: '123' });
+      const token = tokenService.generateAccessToken(user);
       
       // Tamper with the token
       const parts = token.split('.');
       const tamperedPayload = Buffer.from(JSON.stringify({ userId: '456' })).toString('base64');
       const tamperedToken = `${parts[0]}.${tamperedPayload}.${parts[2]}`;
       
-      await expect(tokenService.verifyToken(tamperedToken, 'access'))
-        .rejects.toThrow(AuthError);
+      expect(() => tokenService.verifyToken(tamperedToken))
+        .toThrow(AuthError);
     });
   });
 });

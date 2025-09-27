@@ -1,5 +1,5 @@
 import { EmailService, createEmailService } from '../EmailService';
-import { EmailError } from '../types';
+import { EmailError, IUserRepository } from '../types';
 
 // Mock nodemailer
 const mockTransporter = {
@@ -53,6 +53,16 @@ const mockDatabase = {
   }
 };
 
+const createMockUserRepository = (): IUserRepository => ({
+  create: jest.fn(),
+  findById: jest.fn(),
+  findByEmail: jest.fn(),
+  update: jest.fn(),
+  delete: jest.fn(),
+  findByProvider: jest.fn(),
+  findByOAuthId: jest.fn()
+});
+
 const mockEnv = {
   EMAIL_FROM: 'test@example.com',
   EMAIL_PROVIDER: 'smtp',
@@ -82,7 +92,7 @@ describe('EmailService', () => {
     
     // Create email service
     emailService = createEmailService({
-      database: mockDatabase as any,
+      userRepository: createMockUserRepository(),
     });
   });
 
@@ -148,7 +158,7 @@ describe('EmailService', () => {
       await emailService.sendVerificationEmail(
         'user123',
         'test@example.com',
-        'John Doe'
+        // 'John Doe'
       );
 
       const emailCall = mockTransporter.sendMail.mock.calls[0][0];
@@ -162,7 +172,7 @@ describe('EmailService', () => {
       await expect(emailService.sendVerificationEmail(
         'user123',
         'test@example.com',
-        'John Doe'
+        // 'John Doe'
       )).rejects.toThrow(EmailError);
     });
 
@@ -170,7 +180,7 @@ describe('EmailService', () => {
       const customTemplate = 'Custom verification email for {{name}}';
       
       const customEmailService = createEmailService({
-        database: mockDatabase as any,
+        userRepository: createMockUserRepository(),
         templates: {
           verification: customTemplate,
         },
@@ -179,7 +189,7 @@ describe('EmailService', () => {
       await customEmailService.sendVerificationEmail(
         'user123',
         'test@example.com',
-        'John Doe'
+        // 'John Doe'
       );
 
       const emailCall = mockTransporter.sendMail.mock.calls[0][0];
@@ -192,7 +202,7 @@ describe('EmailService', () => {
       const result = await emailService.sendPasswordResetEmail(
         'user123',
         'test@example.com',
-        'John Doe'
+        // 'John Doe'
       );
 
       expect(result.success).toBe(true);
@@ -312,7 +322,7 @@ describe('EmailService', () => {
 
       try {
         await emailService.verifyEmailToken(verificationToken);
-      } catch (error) {
+      } catch {
         // Expected to throw
       }
 
@@ -409,7 +419,7 @@ describe('EmailService', () => {
       process.env.EMAIL_PROVIDER = 'smtp';
       
       const smtpEmailService = createEmailService({
-        database: mockDatabase as any,
+        userRepository: createMockUserRepository(),
       });
 
       expect(smtpEmailService).toBeDefined();
@@ -419,7 +429,7 @@ describe('EmailService', () => {
       process.env.EMAIL_PROVIDER = 'sendgrid';
       
       const sendgridEmailService = createEmailService({
-        database: mockDatabase as any,
+        userRepository: createMockUserRepository(),
       });
 
       expect(sendgridEmailService).toBeDefined();
@@ -429,7 +439,7 @@ describe('EmailService', () => {
       process.env.EMAIL_PROVIDER = 'mailgun';
       
       const mailgunEmailService = createEmailService({
-        database: mockDatabase as any,
+        userRepository: createMockUserRepository(),
       });
 
       expect(mailgunEmailService).toBeDefined();
@@ -439,7 +449,7 @@ describe('EmailService', () => {
       process.env.EMAIL_PROVIDER = 'invalid-provider';
       
       expect(() => createEmailService({
-        database: mockDatabase as any,
+        userRepository: createMockUserRepository(),
       })).toThrow(EmailError);
     });
 
@@ -447,7 +457,7 @@ describe('EmailService', () => {
       delete process.env.EMAIL_FROM;
       
       expect(() => createEmailService({
-        database: mockDatabase as any,
+        userRepository: createMockUserRepository(),
       })).toThrow(EmailError);
     });
   });
@@ -457,7 +467,7 @@ describe('EmailService', () => {
       const customTemplate = 'Hello {{name}}, your token is {{token}}';
       
       const customEmailService = createEmailService({
-        database: mockDatabase as any,
+        userRepository: createMockUserRepository(),
         templates: {
           verification: customTemplate,
         },
@@ -478,7 +488,7 @@ describe('EmailService', () => {
       const templateWithMissingVar = 'Hello {{name}}, missing: {{missingVar}}';
       
       const customEmailService = createEmailService({
-        database: mockDatabase as any,
+        userRepository: createMockUserRepository(),
         templates: {
           verification: templateWithMissingVar,
         },
@@ -508,7 +518,7 @@ describe('EmailService', () => {
 
     it('should handle rate limiting configuration', () => {
       const rateLimitedEmailService = createEmailService({
-        database: mockDatabase as any,
+        userRepository: createMockUserRepository(),
         rateLimit: {
           maxEmails: 5,
           windowMs: 60000, // 1 minute
@@ -540,7 +550,7 @@ describe('EmailService', () => {
 
       // Should still create service but log warning
       const emailServiceWithFailedVerify = createEmailService({
-        database: mockDatabase as any,
+        userRepository: createMockUserRepository(),
       });
 
       expect(emailServiceWithFailedVerify).toBeDefined();
@@ -573,7 +583,7 @@ describe('EmailService', () => {
       delete process.env.SMTP_HOST;
       
       expect(() => createEmailService({
-        database: mockDatabase as any,
+        userRepository: createMockUserRepository(),
       })).toThrow(EmailError);
     });
 
@@ -582,7 +592,7 @@ describe('EmailService', () => {
       delete process.env.SENDGRID_API_KEY;
       
       expect(() => createEmailService({
-        database: mockDatabase as any,
+        userRepository: createMockUserRepository(),
       })).toThrow(EmailError);
     });
 
@@ -591,13 +601,13 @@ describe('EmailService', () => {
       delete process.env.MAILGUN_API_KEY;
       
       expect(() => createEmailService({
-        database: mockDatabase as any,
+        userRepository: createMockUserRepository(),
       })).toThrow(EmailError);
     });
 
     it('should use default configuration values', () => {
       const defaultEmailService = createEmailService({
-        database: mockDatabase as any,
+        userRepository: createMockUserRepository(),
       });
 
       expect(defaultEmailService).toBeDefined();

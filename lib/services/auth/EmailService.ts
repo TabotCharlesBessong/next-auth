@@ -1,46 +1,27 @@
-import nodemailer from 'nodemailer';
-import crypto from 'crypto';
-import { IEmailService, AuthError } from './types';
+import * as nodemailer from 'nodemailer';
+import * as crypto from 'crypto';
+import { IEmailService, AuthError, EmailConfig } from './types';
 
-interface EmailConfig {
-  provider: 'smtp' | 'sendgrid' | 'mailgun';
-  smtp?: {
-    host: string;
-    port: number;
-    secure: boolean;
-    auth: {
-      user: string;
-      pass: string;
-    };
+interface EmailTemplates {
+  verification: {
+    subject: string;
+    html: string;
+    text: string;
   };
-  sendgrid?: {
-    apiKey: string;
+  passwordReset: {
+    subject: string;
+    html: string;
+    text: string;
   };
-  mailgun?: {
-    apiKey: string;
-    domain: string;
+  welcome: {
+    subject: string;
+    html: string;
+    text: string;
   };
-  from: {
-    name: string;
-    email: string;
-  };
-  templates: {
-    verification: {
-      subject: string;
-      html: string;
-      text: string;
-    };
-    passwordReset: {
-      subject: string;
-      html: string;
-      text: string;
-    };
-    welcome: {
-      subject: string;
-      html: string;
-      text: string;
-    };
-  };
+}
+
+interface ExtendedEmailConfig extends EmailConfig {
+  templates: EmailTemplates;
 }
 
 interface EmailToken {
@@ -53,10 +34,10 @@ interface EmailToken {
 
 export class EmailService implements IEmailService {
   private transporter: nodemailer.Transporter | null = null;
-  private config: EmailConfig;
+  private config: ExtendedEmailConfig;
   private tokenStore: Map<string, EmailToken> = new Map();
 
-  constructor(config: EmailConfig) {
+  constructor(config: ExtendedEmailConfig) {
     this.config = config;
     this.initializeTransporter();
   }
@@ -71,7 +52,7 @@ export class EmailService implements IEmailService {
           if (!this.config.smtp) {
             throw new Error('SMTP configuration is required');
           }
-          this.transporter = nodemailer.createTransporter({
+          this.transporter = nodemailer.createTransport({
             host: this.config.smtp.host,
             port: this.config.smtp.port,
             secure: this.config.smtp.secure,
@@ -83,7 +64,7 @@ export class EmailService implements IEmailService {
           if (!this.config.sendgrid) {
             throw new Error('SendGrid configuration is required');
           }
-          this.transporter = nodemailer.createTransporter({
+          this.transporter = nodemailer.createTransport({
             service: 'SendGrid',
             auth: {
               user: 'apikey',
@@ -98,7 +79,7 @@ export class EmailService implements IEmailService {
           }
           // Note: For Mailgun, you might want to use the official Mailgun SDK
           // This is a basic implementation using nodemailer
-          this.transporter = nodemailer.createTransporter({
+          this.transporter = nodemailer.createTransport({
             host: 'smtp.mailgun.org',
             port: 587,
             secure: false,
@@ -160,9 +141,9 @@ export class EmailService implements IEmailService {
    * Verify an email token
    * @param token - Token to verify
    * @param type - Expected token type
-   * @returns EmailToken data if valid
+   * @returns Promise with email data if valid
    */
-  verifyEmailToken(token: string, type: 'verification' | 'password-reset'): EmailToken {
+  async verifyEmailToken(token: string, type: string): Promise<{ email: string }> {
     const tokenData = this.tokenStore.get(token);
     
     if (!tokenData) {
@@ -182,7 +163,7 @@ export class EmailService implements IEmailService {
       throw new AuthError('Token has expired', 'TOKEN_EXPIRED', 400);
     }
 
-    return tokenData;
+    return { email: tokenData.email };
   }
 
   /**
@@ -356,7 +337,7 @@ export class EmailService implements IEmailService {
       const now = new Date();
       const expiredTokens: string[] = [];
 
-      for (const [token, tokenData] of this.tokenStore.entries()) {
+      for (const [token, tokenData] of Array.from(this.tokenStore.entries())) {
         if (tokenData.expiresAt < now) {
           expiredTokens.push(token);
         }
@@ -388,7 +369,7 @@ export class EmailService implements IEmailService {
     let expiredTokens = 0;
     let usedTokens = 0;
 
-    for (const tokenData of this.tokenStore.values()) {
+    for (const tokenData of Array.from(this.tokenStore.values())) {
       if (tokenData.type === 'verification') {
         verificationTokens++;
       } else if (tokenData.type === 'password-reset') {
@@ -516,11 +497,15 @@ export const defaultEmailTemplates = {
 
 // Export factory function for creating email service instances
 export const createEmailService = (config: EmailConfig): EmailService => {
-  return new EmailService(config);
+  const extendedConfig: ExtendedEmailConfig = {
+    ...config,
+    templates: defaultEmailTemplates,
+  };
+  return new EmailService(extendedConfig);
 };
 
 // Export default configuration helper
-export const createDefaultEmailConfig = (): EmailConfig => ({
+export const createDefaultEmailConfig = (): ExtendedEmailConfig => ({
   provider: 'smtp',
   smtp: {
     host: process.env.SMTP_HOST || 'localhost',
