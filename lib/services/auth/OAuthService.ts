@@ -1,18 +1,18 @@
 import * as crypto from 'crypto';
-import { 
-  IOAuthService, 
-  IUserRepository, 
+import {
+  IOAuthService,
+  IUserRepository,
   ITokenService,
-  OAuthProvider, 
-  OAuthConfig, 
-  OAuthUserData, 
-  AuthUser, 
+  OAuthProvider,
+  OAuthConfig,
+  OAuthUserData,
+  AuthUser,
   AuthResult,
   AuthError,
-  SocialAccount,
-  RegisterData
+  RegisterData,
+  ISocialAccountRepository
 } from './types';
-import { User } from '../../database/types';
+import { User, SocialAccount } from '../../database/types'; // Import SocialAccount from database types
 import { oauthCallbackSchema } from './validation';
 
 interface OAuthProviderConfig {
@@ -57,16 +57,19 @@ interface RawOAuthUserData {
 export class OAuthService implements IOAuthService {
   private userRepository: IUserRepository;
   private tokenService: ITokenService;
+  private socialAccountRepository: ISocialAccountRepository; // Added socialAccountRepository
   private providers: Map<OAuthProvider, OAuthProviderConfig> = new Map();
   private stateStore: Map<string, OAuthState> = new Map();
 
   constructor(
     userRepository: IUserRepository,
     tokenService: ITokenService,
+    socialAccountRepository: ISocialAccountRepository,
     configs: Record<OAuthProvider, OAuthConfig>
   ) {
     this.userRepository = userRepository;
     this.tokenService = tokenService;
+    this.socialAccountRepository = socialAccountRepository;
     this.initializeProviders(configs);
   }
 
@@ -199,7 +202,7 @@ export class OAuthService implements IOAuthService {
       const oauthUserData = await this.getUserInfo(provider, tokenResponse.access_token);
 
       // Find or create user
-      const authResult = await this.findOrCreateUser(provider, oauthUserData);
+      const authResult = await this.findOrCreateUser(provider, oauthUserData, tokenResponse.refresh_token);
 
       // Clean up state
       this.stateStore.delete(validatedData.state);
@@ -248,8 +251,8 @@ export class OAuthService implements IOAuthService {
       const oauthUserData = await this.getUserInfo(oauthProvider, tokenResponse.access_token);
 
       // Check if OAuth account is already linked to another user
-      const existingOAuthUser = await this.userRepository.findByProvider(oauthProvider, oauthUserData.id);
-      if (existingOAuthUser && existingOAuthUser.id !== userId) {
+      const existingSocialAccount = await this.socialAccountRepository.findByProvider(oauthProvider, oauthUserData.id);
+      if (existingSocialAccount && existingSocialAccount.userId !== userId) {
         throw new AuthError(
           'This OAuth account is already linked to another user',
           'OAUTH_ACCOUNT_LINKED',
@@ -257,36 +260,36 @@ export class OAuthService implements IOAuthService {
         );
       }
 
-      // Update user with OAuth information
-      const oauthAccounts: Record<string, any> = user.oauthAccounts || {};
-      oauthAccounts[oauthProvider] = {
-        id: oauthUserData.id,
-        email: oauthUserData.email,
-        name: oauthUserData.name,
-        avatar: oauthUserData.avatar,
-        linkedAt: new Date(),
-      };
+      // Create or update social account
+      let socialAccount: SocialAccount | null;
+      if (existingSocialAccount) {
+        socialAccount = await this.socialAccountRepository.update(existingSocialAccount.id, {
+          accessToken: tokenResponse.access_token,
+          refreshToken: tokenResponse.refresh_token,
+          updatedAt: new Date(),
+        });
+      } else {
+        socialAccount = await this.socialAccountRepository.create({
+          userId: userId,
+          provider: oauthProvider,
+          providerId: oauthUserData.id,
+          email: oauthUserData.email,
+          name: oauthUserData.name,
+          avatar: oauthUserData.avatar,
+          accessToken: tokenResponse.access_token,
+          refreshToken: tokenResponse.refresh_token,
+          isActive: true,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
+      }
 
-      await this.userRepository.update(userId, {
-        oauthAccounts,
-      });
+      if (!socialAccount) {
+        throw new AuthError('Failed to create or update social account', 'SOCIAL_ACCOUNT_SAVE_ERROR', 500);
+      }
 
       console.log(`OAuth account ${oauthProvider} linked to user ${userId}`);
-
-      // Return the created social account
-      return {
-        id: crypto.randomUUID(),
-        userId,
-        provider: oauthProvider,
-        providerId: oauthUserData.id,
-        email: oauthUserData.email,
-        name: oauthUserData.name,
-        avatar: oauthUserData.avatar,
-        accessToken: tokenResponse.access_token,
-        refreshToken: tokenResponse.refresh_token,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
+      return socialAccount;
     } catch (error) {
       if (error instanceof AuthError) {
         throw error;
@@ -311,9 +314,9 @@ export class OAuthService implements IOAuthService {
         throw new AuthError('User not found', 'USER_NOT_FOUND', 404);
       }
 
-      // Get user's OAuth accounts
-      const userOAuthAccounts = await this.userRepository.getUserOAuthAccounts(userId);
-      const targetAccount = userOAuthAccounts.find(account => account.provider === provider);
+      // Get user's OAuth accounts from repository
+      const userSocialAccounts = await this.socialAccountRepository.findByUserId(userId);
+      const targetAccount = userSocialAccounts.find((account: SocialAccount) => account.provider === provider);
       
       if (!targetAccount) {
         throw new AuthError('OAuth account not linked', 'OAUTH_ACCOUNT_NOT_LINKED', 400);
@@ -321,9 +324,9 @@ export class OAuthService implements IOAuthService {
 
       // Check if user has a password or other OAuth accounts
       const hasPassword = !!user.password;
-      const otherOAuthAccounts = userOAuthAccounts.filter(account => account.provider !== provider);
+      const otherSocialAccounts = userSocialAccounts.filter((account: SocialAccount) => account.provider !== provider);
       
-      if (!hasPassword && otherOAuthAccounts.length === 0) {
+      if (!hasPassword && otherSocialAccounts.length === 0) {
         throw new AuthError(
           'Cannot unlink the only authentication method. Please set a password first.',
           'LAST_AUTH_METHOD',
@@ -331,8 +334,8 @@ export class OAuthService implements IOAuthService {
         );
       }
 
-      // Remove OAuth account
-      await this.userRepository.deleteOAuthAccount(targetAccount.id);
+      // Remove OAuth account using the repository
+      await this.socialAccountRepository.delete(targetAccount.id);
 
       console.log(`OAuth account ${provider} unlinked from user ${userId}`);
     } catch (error) {
@@ -384,6 +387,7 @@ export class OAuthService implements IOAuthService {
 
     if (!response.ok) {
       const errorText = await response.text();
+      console.error(`Token exchange HTTP error (${response.status}): ${errorText}`); // Added logging
       throw new AuthError(
         `Token exchange failed: ${response.status} ${errorText}`,
         'TOKEN_EXCHANGE_ERROR',
@@ -395,6 +399,58 @@ export class OAuthService implements IOAuthService {
     
     if (!tokenData.access_token) {
       throw new AuthError('No access token received', 'NO_ACCESS_TOKEN', 400);
+    }
+
+    return tokenData;
+  }
+
+  /**
+   * Refresh OAuth access token
+   * @param provider - OAuth provider
+   * @param refreshToken - Refresh token
+   * @returns New access token and optionally a new refresh token
+   */
+  async refreshAccessToken(provider: OAuthProvider, refreshToken: string): Promise<OAuthTokenResponse> {
+    const providerConfig = this.providers.get(provider);
+    if (!providerConfig) {
+      throw new AuthError(`Provider ${provider} not configured`, 'PROVIDER_NOT_CONFIGURED', 400);
+    }
+
+    const params = new URLSearchParams({
+      client_id: providerConfig.clientId,
+      client_secret: providerConfig.clientSecret,
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+    });
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    };
+
+    if (provider === 'github') {
+      headers['Accept'] = 'application/json';
+    }
+
+    const response = await fetch(providerConfig.tokenUrl, {
+      method: 'POST',
+      headers,
+      body: params.toString(),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`Token refresh HTTP error (${response.status}): ${errorText}`);
+      throw new AuthError(
+        `Token refresh failed: ${response.status} ${errorText}`,
+        'TOKEN_REFRESH_ERROR',
+        response.status
+      );
+    }
+
+    const tokenData = await response.json();
+
+    if (!tokenData.access_token) {
+      throw new AuthError('No access token received during refresh', 'NO_ACCESS_TOKEN', 400);
     }
 
     return tokenData;
@@ -428,6 +484,7 @@ export class OAuthService implements IOAuthService {
 
     if (!response.ok) {
       const errorText = await response.text();
+      console.error(`User info fetch HTTP error (${response.status}): ${errorText}`); // Added logging
       throw new AuthError(
         `Failed to get user info: ${response.status} ${errorText}`,
         'USER_INFO_ERROR',
@@ -490,87 +547,96 @@ export class OAuthService implements IOAuthService {
    * @param oauthUserData - OAuth user data
    * @returns Authentication result
    */
-  private async findOrCreateUser(provider: OAuthProvider, oauthUserData: OAuthUserData): Promise<AuthResult> {
+  private async findOrCreateUser(provider: OAuthProvider, oauthUserData: OAuthUserData, refreshToken?: string): Promise<AuthResult> {
     try {
       // First, try to find user by OAuth ID
-      let user = await this.userRepository.findByOAuthId(provider, oauthUserData.id);
+      let socialAccount = await this.socialAccountRepository.findByProvider(provider, oauthUserData.id);
+      let user: User | null = null;
 
-      if (user) {
-        // Update OAuth account information
-        const oauthAccounts: Record<string, any> = user.oauthAccounts || {};
-        oauthAccounts[provider] = {
-          id: oauthUserData.id,
-          email: oauthUserData.email,
-          name: oauthUserData.name,
-          avatar: oauthUserData.avatar,
-          linkedAt: new Date(),
-        };
+      if (socialAccount) {
+        // If social account exists, find the user associated with it
+        user = await this.userRepository.findById(socialAccount.userId);
 
-        user = await this.userRepository.update(user.id, {
-          oauthAccounts,
-          metadata: {
-            ...(user.metadata as Record<string, unknown> || {}),
-            lastLogin: new Date(),
-            loginCount: ((user.metadata as Record<string, unknown>)?.loginCount as number || 0) + 1,
-          },
+        if (!user) {
+          // This should ideally not happen if data integrity is maintained
+          throw new AuthError('User associated with social account not found', 'USER_NOT_FOUND', 404);
+        }
+        
+        // Update social account with new tokens if available
+        await this.socialAccountRepository.update(socialAccount.id, {
+          accessToken: refreshToken ? undefined : socialAccount.accessToken, // Keep existing if no refresh
+          refreshToken: refreshToken || socialAccount.refreshToken,
+          updatedAt: new Date(),
         });
       } else {
-        // Try to find user by email
+        // No existing social account, try to find user by email
         const existingUser = await this.userRepository.findByEmail(oauthUserData.email);
 
         if (existingUser) {
+          user = existingUser;
           // Link OAuth account to existing user
-          const oauthAccounts: Record<string, any> = existingUser.oauthAccounts || {};
-          oauthAccounts[provider] = {
-            id: oauthUserData.id,
+          socialAccount = await this.socialAccountRepository.create({
+            userId: existingUser.id,
+            provider,
+            providerId: oauthUserData.id,
             email: oauthUserData.email,
             name: oauthUserData.name,
             avatar: oauthUserData.avatar,
-            linkedAt: new Date(),
-          };
-
-          user = await this.userRepository.update(existingUser.id, {
-            oauthAccounts,
-            emailVerified: oauthUserData.emailVerified || existingUser.emailVerified,
-            metadata: {
-              ...(existingUser.metadata as Record<string, unknown> || {}),
-              lastLogin: new Date(),
-              loginCount: ((existingUser.metadata as Record<string, unknown>)?.loginCount as number || 0) + 1,
-            },
+            accessToken: refreshToken ? undefined : undefined, // OAuth tokens are often short-lived
+            refreshToken: refreshToken,
+            isActive: true,
+            createdAt: new Date(),
+            updatedAt: new Date(),
           });
+
+          // Update user's email verification status if the OAuth provider verifies it
+          if (oauthUserData.emailVerified && !existingUser.isEmailVerified) {
+            await this.userRepository.update(existingUser.id, { isEmailVerified: true });
+          }
         } else {
-          // Create new user with OAuth data
-          const userData: RegisterData = {
+          // Create new user and social account with OAuth data
+          const newUserData: RegisterData = {
             email: oauthUserData.email,
             password: crypto.randomBytes(32).toString('hex'), // Placeholder password for OAuth users
             fullName: oauthUserData.name,
-            emailVerified: oauthUserData.emailVerified || true, // OAuth emails are typically verified
+            firstName: oauthUserData.name?.split(' ')[0] || '',
+            lastName: oauthUserData.name?.split(' ').slice(1).join(' ') || '',
+            avatar: oauthUserData.avatar,
+            isEmailVerified: oauthUserData.emailVerified || true,
             isActive: true,
-            profile: {
-              firstName: oauthUserData.name?.split(' ')[0] || '',
-              lastName: oauthUserData.name?.split(' ').slice(1).join(' ') || '',
-              avatar: oauthUserData.avatar,
-            },
-            oauthAccounts: {
-              [provider]: {
-                id: oauthUserData.id,
-                email: oauthUserData.email,
-                name: oauthUserData.name,
-                avatar: oauthUserData.avatar,
-                linkedAt: new Date(),
-              },
-            },
             metadata: {
               registrationDate: new Date(),
-              lastLogin: new Date(),
-              loginCount: 1,
-              isOAuthUser: true, // Flag to indicate this is an OAuth user
+              isOAuthUser: true,
             },
           };
+
+          user = await this.userRepository.create(newUserData);
           
-          user = await this.userRepository.create(userData);
+          socialAccount = await this.socialAccountRepository.create({
+            userId: user.id,
+            provider,
+            providerId: oauthUserData.id,
+            email: oauthUserData.email,
+            name: oauthUserData.name,
+            avatar: oauthUserData.avatar,
+            accessToken: refreshToken ? undefined : undefined,
+            refreshToken: refreshToken,
+            isActive: true,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          });
         }
       }
+
+      // Update user login metadata
+      const currentMetadata = (user.metadata as Record<string, unknown>) || {};
+      user = await this.userRepository.update(user.id, {
+        metadata: {
+          ...currentMetadata,
+          lastLogin: new Date(),
+          loginCount: ((currentMetadata.loginCount as number) || 0) + 1,
+        },
+      });
 
       // Ensure user exists before proceeding
       if (!user) {
@@ -675,9 +741,10 @@ export class OAuthService implements IOAuthService {
 export const createOAuthService = (
   userRepository: IUserRepository,
   tokenService: ITokenService,
+  socialAccountRepository: ISocialAccountRepository,
   configs: Record<OAuthProvider, OAuthConfig>
 ): OAuthService => {
-  return new OAuthService(userRepository, tokenService, configs);
+  return new OAuthService(userRepository, tokenService, socialAccountRepository, configs);
 };
 
 // Helper function to create OAuth configuration from environment variables

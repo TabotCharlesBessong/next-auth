@@ -1,6 +1,7 @@
 import * as nodemailer from 'nodemailer';
 import * as crypto from 'crypto';
 import { IEmailService, AuthError, EmailConfig } from './types';
+import { EmailTokenRepository, EmailVerification } from '../../database/types'; // Import EmailTokenRepository and EmailVerification
 
 interface EmailTemplates {
   verification: {
@@ -24,21 +25,16 @@ interface ExtendedEmailConfig extends EmailConfig {
   templates: EmailTemplates;
 }
 
-interface EmailToken {
-  token: string;
-  email: string;
-  type: 'verification' | 'password-reset';
-  expiresAt: Date;
-  used: boolean;
-}
+// Removed EmailToken interface as we will use EmailVerification from the database types
 
 export class EmailService implements IEmailService {
   private transporter: nodemailer.Transporter | null = null;
   private config: ExtendedEmailConfig;
-  private tokenStore: Map<string, EmailToken> = new Map();
+  private emailTokenRepository: EmailTokenRepository; // Added EmailTokenRepository
 
-  constructor(config: ExtendedEmailConfig) {
+  constructor(config: ExtendedEmailConfig, emailTokenRepository: EmailTokenRepository) {
     this.config = config;
+    this.emailTokenRepository = emailTokenRepository;
     this.initializeTransporter();
   }
 
@@ -115,7 +111,7 @@ export class EmailService implements IEmailService {
    * @param type - Token type
    * @returns string - Generated token
    */
-  private generateEmailToken(email: string, type: 'verification' | 'password-reset'): string {
+  private async generateEmailToken(email: string, type: 'verification' | 'password-reset'): Promise<string> {
     const token = crypto.randomBytes(32).toString('hex');
     const expiresAt = new Date();
     
@@ -126,13 +122,21 @@ export class EmailService implements IEmailService {
       expiresAt.setHours(expiresAt.getHours() + 1); // 1 hour for password reset
     }
 
-    this.tokenStore.set(token, {
+    const emailVerification: EmailVerification = {
+      id: token, // Using the token as the ID for simplicity
       token,
       email,
       type,
       expiresAt,
-      used: false,
-    });
+      isUsed: false, 
+      userId: '', // Initialize userId as an empty string, or pass as a parameter if available
+      isVerified: false,
+      attempts: 0,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    await this.emailTokenRepository.create(emailVerification);
 
     return token;
   }
@@ -143,23 +147,19 @@ export class EmailService implements IEmailService {
    * @param type - Expected token type
    * @returns Promise with email data if valid
    */
-  async verifyEmailToken(token: string, type: string): Promise<{ email: string }> {
-    const tokenData = this.tokenStore.get(token);
+  async verifyEmailToken(token: string, type: 'verification' | 'password-reset'): Promise<{ email: string }> {
+    const tokenData = await this.emailTokenRepository.findByToken(token, type);
     
     if (!tokenData) {
       throw new AuthError('Invalid or expired token', 'INVALID_TOKEN', 400);
     }
 
-    if (tokenData.type !== type) {
-      throw new AuthError('Invalid token type', 'INVALID_TOKEN_TYPE', 400);
-    }
-
-    if (tokenData.used) {
+    if (tokenData.isUsed) {
       throw new AuthError('Token has already been used', 'TOKEN_ALREADY_USED', 400);
     }
 
     if (tokenData.expiresAt < new Date()) {
-      this.tokenStore.delete(token);
+      // No need to delete, cleanup job handles it or it will be marked as expired
       throw new AuthError('Token has expired', 'TOKEN_EXPIRED', 400);
     }
 
@@ -170,11 +170,10 @@ export class EmailService implements IEmailService {
    * Mark a token as used
    * @param token - Token to mark as used
    */
-  markTokenAsUsed(token: string): void {
-    const tokenData = this.tokenStore.get(token);
+  async markTokenAsUsed(token: string): Promise<void> {
+    const tokenData = await this.emailTokenRepository.findByToken(token, 'verification'); // Assuming token type is for verification to find it first
     if (tokenData) {
-      tokenData.used = true;
-      this.tokenStore.set(token, tokenData);
+      await this.emailTokenRepository.markAsUsed(tokenData.id);
     }
   }
 
@@ -334,20 +333,8 @@ export class EmailService implements IEmailService {
    */
   async cleanupExpiredTokens(): Promise<void> {
     try {
-      const now = new Date();
-      const expiredTokens: string[] = [];
-
-      for (const [token, tokenData] of Array.from(this.tokenStore.entries())) {
-        if (tokenData.expiresAt < now) {
-          expiredTokens.push(token);
-        }
-      }
-
-      for (const token of expiredTokens) {
-        this.tokenStore.delete(token);
-      }
-
-      console.log(`Cleaned up ${expiredTokens.length} expired email tokens`);
+      const cleanedCount = await this.emailTokenRepository.cleanupExpiredTokens();
+      console.log(`Cleaned up ${cleanedCount} expired email tokens`);
     } catch (error) {
       console.error('Failed to cleanup expired email tokens:', error);
     }
@@ -356,37 +343,21 @@ export class EmailService implements IEmailService {
   /**
    * Get email service statistics
    */
-  getEmailStats(): {
+  async getEmailStats(): Promise<{
     totalTokens: number;
     verificationTokens: number;
     passwordResetTokens: number;
     expiredTokens: number;
     usedTokens: number;
-  } {
-    const now = new Date();
-    let verificationTokens = 0;
-    let passwordResetTokens = 0;
-    let expiredTokens = 0;
-    let usedTokens = 0;
-
-    for (const tokenData of Array.from(this.tokenStore.values())) {
-      if (tokenData.type === 'verification') {
-        verificationTokens++;
-      } else if (tokenData.type === 'password-reset') {
-        passwordResetTokens++;
-      }
-
-      if (tokenData.expiresAt < now) {
-        expiredTokens++;
-      }
-
-      if (tokenData.used) {
-        usedTokens++;
-      }
-    }
+  }> {
+    const totalTokens = await this.emailTokenRepository.count({});
+    const verificationTokens = await this.emailTokenRepository.count({ type: 'verification' });
+    const passwordResetTokens = await this.emailTokenRepository.count({ type: 'password-reset' });
+    const expiredTokens = await this.emailTokenRepository.count({ expiresAt: { $lt: new Date() } });
+    const usedTokens = await this.emailTokenRepository.count({ isUsed: true });
 
     return {
-      totalTokens: this.tokenStore.size,
+      totalTokens,
       verificationTokens,
       passwordResetTokens,
       expiredTokens,
@@ -496,12 +467,15 @@ export const defaultEmailTemplates = {
 };
 
 // Export factory function for creating email service instances
-export const createEmailService = (config: EmailConfig): EmailService => {
+export const createEmailService = (
+  config: EmailConfig,
+  emailTokenRepository: EmailTokenRepository
+): EmailService => {
   const extendedConfig: ExtendedEmailConfig = {
     ...config,
     templates: defaultEmailTemplates,
   };
-  return new EmailService(extendedConfig);
+  return new EmailService(extendedConfig, emailTokenRepository);
 };
 
 // Export default configuration helper

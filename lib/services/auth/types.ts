@@ -1,4 +1,4 @@
-import { User } from '../../database/types';
+import { User, SocialAccount, SocialAccountRepository as DB_SocialAccountRepository } from '../../database/types';
 
 // Authentication Data Types
 export interface RegisterData {
@@ -84,6 +84,14 @@ export type UserRole = 'user' | 'admin' | 'moderator';
 
 // Token types
 export type TokenData = TokenPayload;
+
+export interface UserForTokenGeneration {
+  id: string;
+  email: string;
+  role?: string;
+  [key: string]: unknown;
+}
+
 export interface TokenConfig {
   accessTokenSecret: string;
   refreshTokenSecret: string;
@@ -134,20 +142,6 @@ export type AuthErrorCode =
   | 'INVALID_TOKEN'
   | 'RATE_LIMIT_EXCEEDED';
 
-export interface SocialAccount {
-  id: string;
-  userId: string;
-  provider: string;
-  providerId: string;
-  email: string;
-  name: string;
-  avatar?: string;
-  accessToken?: string;
-  refreshToken?: string;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
 export interface OAuthConfig {
   clientId: string;
   clientSecret: string;
@@ -180,8 +174,8 @@ export interface IOAuthService {
 }
 
 export interface ITokenService {
-  generateAccessToken(user: User): string;
-  generateRefreshToken(user: User): string;
+  generateAccessToken(user: UserForTokenGeneration): string;
+  generateRefreshToken(user: UserForTokenGeneration): Promise<string>; // Changed return type to Promise<string>
   generateTokenPair(userId: string, payload: Partial<TokenPayload>): Promise<TokenPair>;
   verifyToken(token: string): TokenPayload;
   revokeToken(token: string): Promise<void>;
@@ -200,6 +194,8 @@ export interface IEmailService {
   sendWelcomeEmail(email: string, name: string): Promise<void>;
   verifyEmailToken(token: string, type: string): Promise<{ email: string }>;
 }
+
+export interface ISocialAccountRepository extends DB_SocialAccountRepository {}
 
 export interface IUserRepository {
   create(userData: RegisterData): Promise<User>;
