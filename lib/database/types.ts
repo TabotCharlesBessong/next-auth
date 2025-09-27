@@ -119,6 +119,7 @@ export interface EmailVerification {
   isVerified: boolean;
   type: 'verification' | 'password-reset';
   verifiedAt?: Date;
+  usedAt?: Date; // Added missing property
   attempts: number;
   ipAddress?: string;
   userAgent?: string;
@@ -209,14 +210,14 @@ export interface DeleteOptions {
 
 // Repository interfaces
 export interface BaseRepository<T> {
-  create(data: Partial<T>, options?: CreateOptions): Promise<T>;
-  findById(id: string, options?: QueryOptions): Promise<T | null>;
-  findOne(where: WhereClause, options?: QueryOptions): Promise<T | null>;
-  findMany(where?: WhereClause, options?: QueryOptions): Promise<T[]>;
-  update(id: string, data: Partial<T>, options?: UpdateOptions): Promise<T | null>;
-  updateMany(data: Partial<T>, options: UpdateOptions): Promise<number>;
-  delete(id: string, options?: DeleteOptions): Promise<boolean>;
-  deleteMany(options: DeleteOptions): Promise<number>;
+  create(data: Partial<T>, options?: any): Promise<T>;
+  findById(id: string, options?: any): Promise<T | null>;
+  findOne(where: WhereClause, options?: any): Promise<T | null>;
+  findMany(where?: WhereClause, options?: any): Promise<T[]>;
+  update(id: string, data: Partial<T>, options?: any): Promise<T | null>;
+  updateMany(data: Partial<T>, options: any): Promise<number>;
+  delete(id: string, options?: any): Promise<boolean>;
+  deleteMany(options: any): Promise<number>;
   count(where?: WhereClause): Promise<number>;
   exists(where: WhereClause): Promise<boolean>;
 }
