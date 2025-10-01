@@ -1,19 +1,14 @@
 import * as jwt from 'jsonwebtoken';
 import * as crypto from 'crypto';
-import { ITokenService, TokenPayload, TokenPair, AuthError, UnauthorizedError } from './types';
+import { ITokenService, TokenPayload, TokenPair, AuthError, UnauthorizedError, UserForTokenGeneration } from './types';
 import { User } from '../../database/types';
+import { RefreshTokenRepository, Session } from '../../database/types';
 
-interface RefreshTokenData {
-  userId: string;
-  tokenId: string;
-  expiresAt: Date;
-  isRevoked: boolean;
-}
-
-interface TokenGenerationPayload {
-  email?: string;
-  role?: string;
-  [key: string]: unknown;
+interface TokenGenerationPayload extends UserForTokenGeneration {
+  // UserForTokenGeneration already includes id, email, role, and [key: string]: unknown;
+  // No additional properties are needed here if TokenGenerationPayload is meant to be a subset or extension of UserForTokenGeneration.
+  // If it's meant to be just the additional properties, remove extends UserForTokenGeneration and explicitly define.
+  // Given the current usage, extending seems appropriate to combine common fields.
 }
 
 export class TokenService implements ITokenService {
@@ -22,22 +17,22 @@ export class TokenService implements ITokenService {
   private readonly refreshTokenExpiry: string;
   private readonly issuer: string;
   private readonly audience: string;
+  private refreshTokenRepository: RefreshTokenRepository;
   
-  // In-memory store for refresh tokens (in production, use Redis or database)
-  private refreshTokenStore: Map<string, RefreshTokenData> = new Map();
-
   constructor(config: {
     jwtSecret: string;
     accessTokenExpiry?: string;
     refreshTokenExpiry?: string;
     issuer?: string;
     audience?: string;
+    refreshTokenRepository: RefreshTokenRepository; // Added RefreshTokenRepository
   }) {
     this.jwtSecret = config.jwtSecret;
     this.accessTokenExpiry = config.accessTokenExpiry || '15m';
     this.refreshTokenExpiry = config.refreshTokenExpiry || '7d';
     this.issuer = config.issuer || 'next-auth-template';
     this.audience = config.audience || 'next-auth-users';
+    this.refreshTokenRepository = config.refreshTokenRepository;
 
     if (!this.jwtSecret) {
       throw new Error('JWT secret is required');
@@ -53,12 +48,12 @@ export class TokenService implements ITokenService {
    * @param user - User object
    * @returns string - JWT access token
    */
-  generateAccessToken(user: User): string {
+  generateAccessToken(user: UserForTokenGeneration): string {
     try {
       const payload: Omit<TokenPayload, 'iat' | 'exp'> = {
         userId: user.id,
         email: user.email,
-        role: (user as User & { role?: string }).role || 'user',
+        role: user.role || 'user',
       };
 
       const options: jwt.SignOptions = {
@@ -85,7 +80,7 @@ export class TokenService implements ITokenService {
    * @param user - User object
    * @returns string - Refresh token
    */
-  generateRefreshToken(user: User): string {
+  async generateRefreshToken(user: UserForTokenGeneration): Promise<string> {
     try {
       const tokenId = crypto.randomUUID();
       const expiresAt = new Date();
@@ -94,12 +89,14 @@ export class TokenService implements ITokenService {
       const expiryMs = this.parseExpiryToMs(this.refreshTokenExpiry);
       expiresAt.setTime(expiresAt.getTime() + expiryMs);
 
-      // Store refresh token data
-      this.refreshTokenStore.set(tokenId, {
+      // Store refresh token data in the database
+      await this.refreshTokenRepository.create({
         userId: user.id,
-        tokenId,
+        token: tokenId, // Using tokenId as the token value in the Session model
         expiresAt,
-        isRevoked: false,
+        isActive: true, // Mark as active
+        createdAt: new Date(),
+        updatedAt: new Date(),
       });
 
       const payload = {
@@ -136,14 +133,16 @@ export class TokenService implements ITokenService {
   async generateTokenPair(userId: string, payload: TokenGenerationPayload): Promise<TokenPair> {
     try {
       // Create a user-like object for token generation
-      const userForToken = {
+      const { id: _, email: __, role: ___, ...restPayload } = payload; // Destructure to avoid duplicates
+      const userForToken: UserForTokenGeneration = {
         id: userId,
         email: payload.email || '',
-        ...payload
+        role: payload.role,
+        ...restPayload
       };
 
-      const accessToken = this.generateAccessToken(userForToken as User);
-      const refreshToken = this.generateRefreshToken(userForToken as User);
+      const accessToken = this.generateAccessToken(userForToken as UserForTokenGeneration);
+      const refreshToken = await this.generateRefreshToken(userForToken as UserForTokenGeneration); // Await refresh token generation
 
       return {
         accessToken,
@@ -189,7 +188,7 @@ export class TokenService implements ITokenService {
    * @param token - Refresh token to verify
    * @returns RefreshTokenData - Token data if valid
    */
-  verifyRefreshToken(token: string): RefreshTokenData {
+  async verifyRefreshToken(token: string): Promise<Session> {
     try {
       const decoded = jwt.verify(token, this.jwtSecret, {
         issuer: this.issuer,
@@ -200,17 +199,17 @@ export class TokenService implements ITokenService {
         throw new UnauthorizedError('Invalid token type');
       }
 
-      const tokenData = this.refreshTokenStore.get(decoded.tokenId);
+      const tokenData = await this.refreshTokenRepository.findByTokenId(decoded.tokenId);
       if (!tokenData) {
         throw new UnauthorizedError('Refresh token not found');
       }
 
-      if (tokenData.isRevoked) {
+      if (!tokenData.isActive) {
         throw new UnauthorizedError('Refresh token has been revoked');
       }
 
       if (tokenData.expiresAt < new Date()) {
-        this.refreshTokenStore.delete(decoded.tokenId);
+        // Consider cleaning up expired token here, but repository should handle it via cleanup task
         throw new UnauthorizedError('Refresh token has expired');
       }
 
@@ -237,15 +236,14 @@ export class TokenService implements ITokenService {
       const decoded = jwt.decode(token) as jwt.JwtPayload | null;
       
       if (decoded && typeof decoded === 'object' && decoded.jti) {
-        const tokenData = this.refreshTokenStore.get(decoded.jti);
-        if (tokenData) {
-          tokenData.isRevoked = true;
-          this.refreshTokenStore.set(decoded.jti, tokenData);
-        }
+        await this.refreshTokenRepository.revokeToken(decoded.jti);
       }
     } catch (error) {
-      // Silently fail for invalid tokens
-      console.warn('Failed to revoke token:', error);
+      throw new AuthError(
+        `Failed to revoke token: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        'TOKEN_REVOCATION_ERROR',
+        500
+      );
     }
   }
 
@@ -255,12 +253,7 @@ export class TokenService implements ITokenService {
    */
   async revokeAllUserTokens(userId: string): Promise<void> {
     try {
-      for (const [tokenId, tokenData] of Array.from(this.refreshTokenStore.entries())) {
-        if (tokenData.userId === userId) {
-          tokenData.isRevoked = true;
-          this.refreshTokenStore.set(tokenId, tokenData);
-        }
-      }
+      await this.refreshTokenRepository.revokeAllUserTokens(userId);
     } catch (error) {
       throw new AuthError(
         `Failed to revoke user tokens: ${error instanceof Error ? error.message : 'Unknown error'}`,
@@ -275,20 +268,7 @@ export class TokenService implements ITokenService {
    */
   async cleanupExpiredTokens(): Promise<void> {
     try {
-      const now = new Date();
-      const expiredTokens: string[] = [];
-
-      for (const [tokenId, tokenData] of Array.from(this.refreshTokenStore.entries())) {
-        if (tokenData.expiresAt < now) {
-          expiredTokens.push(tokenId);
-        }
-      }
-
-      for (const tokenId of expiredTokens) {
-        this.refreshTokenStore.delete(tokenId);
-      }
-
-      console.log(`Cleaned up ${expiredTokens.length} expired tokens`);
+      await this.refreshTokenRepository.cleanupExpiredTokens();
     } catch (error) {
       console.error('Failed to cleanup expired tokens:', error);
     }
@@ -385,29 +365,19 @@ export class TokenService implements ITokenService {
    * Get refresh token statistics
    * @returns Object with token statistics
    */
-  getTokenStats(): {
+  async getTokenStats(): Promise<{
     totalTokens: number;
     activeTokens: number;
     revokedTokens: number;
     expiredTokens: number;
-  } {
-    const now = new Date();
-    let activeTokens = 0;
-    let revokedTokens = 0;
-    let expiredTokens = 0;
-
-    for (const tokenData of Array.from(this.refreshTokenStore.values())) {
-      if (tokenData.isRevoked) {
-        revokedTokens++;
-      } else if (tokenData.expiresAt < now) {
-        expiredTokens++;
-      } else {
-        activeTokens++;
-      }
-    }
+  }> {
+    const totalTokens = await this.refreshTokenRepository.count({});
+    const activeTokens = await this.refreshTokenRepository.count({ isActive: true, expiresAt: { $gt: new Date() } });
+    const revokedTokens = await this.refreshTokenRepository.count({ isActive: false });
+    const expiredTokens = await this.refreshTokenRepository.count({ expiresAt: { $lt: new Date() } });
 
     return {
-      totalTokens: this.refreshTokenStore.size,
+      totalTokens,
       activeTokens,
       revokedTokens,
       expiredTokens,
@@ -422,15 +392,19 @@ export const createTokenService = (config: {
   refreshTokenExpiry?: string;
   issuer?: string;
   audience?: string;
+  refreshTokenRepository: RefreshTokenRepository;
 }): TokenService => {
   return new TokenService(config);
 };
 
 // Export default instance (will need to be configured with environment variables)
+// This should ideally not be used directly, but through a factory that provides the repository
+// For simplicity in a template, we provide a placeholder.
 export const tokenService = new TokenService({
   jwtSecret: process.env.JWT_SECRET || TokenService.generateSecret(),
   accessTokenExpiry: process.env.JWT_ACCESS_TOKEN_EXPIRY || '15m',
   refreshTokenExpiry: process.env.JWT_REFRESH_TOKEN_EXPIRY || '7d',
   issuer: process.env.JWT_ISSUER || 'next-auth-template',
   audience: process.env.JWT_AUDIENCE || 'next-auth-users',
+  refreshTokenRepository: {} as RefreshTokenRepository, // Placeholder: MUST be replaced with actual repository
 });

@@ -1,17 +1,17 @@
 import { Op, Transaction, WhereOptions } from 'sequelize';
-import { AbstractBaseRepository } from '../../base/BaseRepository';
-import { Session, SessionRepository, QueryOptions, WhereClause, UpdateOptions, DeleteOptions, ValidationError } from '../../types';
+import { BaseRepository, Session, SessionRepository, QueryOptions, WhereClause, UpdateOptions, DeleteOptions, ValidationError } from '../../types';
 import { SessionModel } from '../models';
+import { AbstractBaseRepository } from '../../base/AbstractBaseRepository';
 
 /**
  * Sequelize implementation of SessionRepository
  */
 export class SequelizeSessionRepository extends AbstractBaseRepository<Session> implements SessionRepository {
-  private sessionModel: typeof SessionModel;
+  protected model: typeof SessionModel; // Explicitly define model type
 
   constructor(sessionModel: typeof SessionModel) {
-    super('sessions', sessionModel.sequelize);
-    this.sessionModel = sessionModel;
+    super(sessionModel);
+    this.model = sessionModel;
   }
 
   /**
@@ -41,7 +41,7 @@ export class SequelizeSessionRepository extends AbstractBaseRepository<Session> 
         lastAccessedAt: now,
       } as Session;
 
-      const session = await this.sessionModel.create(sessionData);
+      const session = await this.model.create(sessionData);
       return this.mapRowToEntity(session.toJSON() as unknown as Record<string, unknown>);
     } catch (error) {
       this.handleDatabaseError(error, 'create session');
@@ -57,7 +57,7 @@ export class SequelizeSessionRepository extends AbstractBaseRepository<Session> 
         return null;
       }
 
-      const session = await this.sessionModel.findByPk(id, {
+      const session = await this.model.findByPk(id, {
         attributes: this.buildSelectFields(),
         include: this.buildIncludeClause(options),
       });
@@ -77,7 +77,7 @@ export class SequelizeSessionRepository extends AbstractBaseRepository<Session> 
         return null;
       }
 
-      const session = await this.sessionModel.findOne({
+      const session = await this.model.findOne({
         where: { 
           token,
           isActive: true,
@@ -109,7 +109,7 @@ export class SequelizeSessionRepository extends AbstractBaseRepository<Session> 
 
       const { limit, offset } = this.buildLimitClause(options);
       
-      const sessions = await this.sessionModel.findAll({
+      const sessions = await this.model.findAll({
         where: {
           userId,
           isActive: true,
@@ -137,7 +137,7 @@ export class SequelizeSessionRepository extends AbstractBaseRepository<Session> 
         return [];
       }
       
-      const sessions = await this.sessionModel.findAll({
+      const sessions = await this.model.findAll({
         where: {
           userId,
           isActive: true,
@@ -157,7 +157,7 @@ export class SequelizeSessionRepository extends AbstractBaseRepository<Session> 
    */
   async invalidateUserSessions(userId: string): Promise<void> {
     try {
-      await this.sessionModel.update(
+      await this.model.update(
         {
           isActive: false,
           updatedAt: this.getCurrentTimestamp()
@@ -179,7 +179,7 @@ export class SequelizeSessionRepository extends AbstractBaseRepository<Session> 
    */
   async cleanupExpiredSessions(): Promise<number> {
     try {
-      const affectedRows = await this.sessionModel.destroy({
+      const affectedRows = await this.model.destroy({
         where: {
           [Op.or]: [
             { expiresAt: { [Op.lt]: new Date() } },
@@ -199,7 +199,7 @@ export class SequelizeSessionRepository extends AbstractBaseRepository<Session> 
    */
   async findOne(where: WhereClause, options?: QueryOptions): Promise<Session | null> {
     try {
-      const session = await this.sessionModel.findOne({
+      const session = await this.model.findOne({
         where: this.buildWhereClause(where),
         attributes: this.buildSelectFields(),
         include: this.buildIncludeClause(options),
@@ -219,7 +219,7 @@ export class SequelizeSessionRepository extends AbstractBaseRepository<Session> 
     try {
       const { limit, offset } = this.buildLimitClause(options);
       
-      const sessions = await this.sessionModel.findAll({
+      const sessions = await this.model.findAll({
         where: where ? this.buildWhereClause(where) : undefined,
         attributes: this.buildSelectFields(),
         include: this.buildIncludeClause(options),
@@ -249,7 +249,7 @@ export class SequelizeSessionRepository extends AbstractBaseRepository<Session> 
         updatedAt: this.getCurrentTimestamp(),
       };
 
-      const [affectedRows] = await this.sessionModel.update(updateData, {
+      const [affectedRows] = await this.model.update(updateData, {
         where: { id },
         returning: true,
       });
@@ -275,7 +275,7 @@ export class SequelizeSessionRepository extends AbstractBaseRepository<Session> 
         updatedAt: this.getCurrentTimestamp(),
       };
 
-      const [affectedRows] = await this.sessionModel.update(updateData, {
+      const [affectedRows] = await this.model.update(updateData, {
         where: this.buildWhereClause(options.where),
       });
 
@@ -300,7 +300,7 @@ export class SequelizeSessionRepository extends AbstractBaseRepository<Session> 
         return result !== null;
       } else {
         // Hard delete
-        const affectedRows = await this.sessionModel.destroy({
+        const affectedRows = await this.model.destroy({
           where: { id },
         });
         return affectedRows > 0;
@@ -320,7 +320,7 @@ export class SequelizeSessionRepository extends AbstractBaseRepository<Session> 
         return await this.updateMany({ isActive: false }, options);
       } else {
         // Hard delete
-        const affectedRows = await this.sessionModel.destroy({
+        const affectedRows = await this.model.destroy({
           where: this.buildWhereClause(options.where),
         });
         return affectedRows;
@@ -335,7 +335,7 @@ export class SequelizeSessionRepository extends AbstractBaseRepository<Session> 
    */
   async count(where?: WhereClause): Promise<number> {
     try {
-      return await this.sessionModel.count({
+      return await this.model.count({
         where: where ? this.buildWhereClause(where) : undefined,
       });
     } catch (error) {
@@ -348,7 +348,7 @@ export class SequelizeSessionRepository extends AbstractBaseRepository<Session> 
    */
   async exists(where: WhereClause): Promise<boolean> {
     try {
-      const count = await this.sessionModel.count({
+      const count = await this.model.count({
         where: this.buildWhereClause(where),
       });
       return count > 0;
@@ -362,7 +362,7 @@ export class SequelizeSessionRepository extends AbstractBaseRepository<Session> 
    */
   async updateLastAccessed(id: string): Promise<void> {
     try {
-      await this.sessionModel.update(
+      await this.model.update(
         { 
           lastAccessedAt: this.getCurrentTimestamp(),
           updatedAt: this.getCurrentTimestamp()
@@ -393,7 +393,7 @@ export class SequelizeSessionRepository extends AbstractBaseRepository<Session> 
    */
   async invalidateByToken(token: string): Promise<boolean> {
     try {
-      const [affectedRows] = await this.sessionModel.update(
+      const [affectedRows] = await this.model.update(
         { 
           isActive: false,
           updatedAt: this.getCurrentTimestamp()
@@ -420,7 +420,7 @@ export class SequelizeSessionRepository extends AbstractBaseRepository<Session> 
         whereClause.id = { [Op.not]: exceptSessionId };
       }
 
-      const [affectedRows] = await this.sessionModel.update(
+      const [affectedRows] = await this.model.update(
         { 
           isActive: false,
           updatedAt: this.getCurrentTimestamp()
@@ -439,7 +439,7 @@ export class SequelizeSessionRepository extends AbstractBaseRepository<Session> 
    */
   async cleanupExpired(): Promise<number> {
     try {
-      const affectedRows = await this.sessionModel.destroy({
+      const affectedRows = await this.model.destroy({
         where: {
           [Op.or]: [
             { expiresAt: { [Op.lt]: new Date() } },
@@ -462,7 +462,7 @@ export class SequelizeSessionRepository extends AbstractBaseRepository<Session> 
       const expirationThreshold = new Date();
       expirationThreshold.setHours(expirationThreshold.getHours() + hours);
 
-      const sessions = await this.sessionModel.findAll({
+      const sessions = await this.model.findAll({
         where: {
           isActive: true,
           expiresAt: {
@@ -490,15 +490,15 @@ export class SequelizeSessionRepository extends AbstractBaseRepository<Session> 
   }> {
     try {
       const [total, active, expired, lastSession] = await Promise.all([
-        this.sessionModel.count({ where: { userId } }),
-        this.sessionModel.count({ 
+        this.model.count({ where: { userId } }),
+        this.model.count({ 
           where: { 
             userId, 
             isActive: true,
             expiresAt: { [Op.gt]: new Date() }
           } 
         }),
-        this.sessionModel.count({ 
+        this.model.count({ 
           where: { 
             userId,
             [Op.or]: [
@@ -507,7 +507,7 @@ export class SequelizeSessionRepository extends AbstractBaseRepository<Session> 
             ]
           } 
         }),
-        this.sessionModel.findOne({
+        this.model.findOne({
           where: { userId },
           order: [['lastAccessedAt', 'DESC']],
           attributes: ['lastAccessedAt'],
@@ -581,7 +581,7 @@ export class SequelizeSessionRepository extends AbstractBaseRepository<Session> 
    * Executes a transaction
    */
   protected async executeTransaction<R>(callback: (trx: import('sequelize').Transaction | import('mongoose').ClientSession) => Promise<R>): Promise<R> {
-    return await this.sessionModel.sequelize!.transaction(callback);
+    return await (this.model as typeof SessionModel).sequelize!.transaction(callback);
   }
 
   /**
@@ -609,5 +609,70 @@ export class SequelizeSessionRepository extends AbstractBaseRepository<Session> 
     }
     
     return includes;
+  }
+
+  protected validateRequiredFields(data: Partial<Session>, requiredFields: string[]): void {
+    for (const field of requiredFields) {
+      if (!(field in data) || data[field as keyof Session] === undefined) {
+        throw new ValidationError(`Missing required field: ${field}`);
+      }
+    }
+  }
+
+  protected sanitizeData(data: Partial<Session>, removeNull = false): Partial<Session> {
+    const sanitized: Partial<Session> = {};
+    for (const [key, value] of Object.entries(data)) {
+      if (value !== undefined && (!removeNull || value !== null)) {
+        (sanitized as Record<string, unknown>)[key] = value;
+      }
+    }
+    return sanitized;
+  }
+
+  protected generateId(): string {
+    return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+  }
+
+  protected getCurrentTimestamp(): Date {
+    return new Date();
+  }
+
+  protected validateUUID(id: string): boolean {
+    // Basic UUID validation, consider a library like uuid for robust validation
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[4][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    return uuidRegex.test(id);
+  }
+
+  protected buildOrderClause(options?: QueryOptions): string {
+    if (!options?.orderBy) {
+      return 'createdAt DESC';
+    }
+    const direction = options.orderDirection || 'ASC';
+    return `${options.orderBy} ${direction}`;
+  }
+
+  protected buildLimitClause(options?: QueryOptions): { limit?: number; offset?: number } {
+    return {
+      limit: options?.limit,
+      offset: options?.offset
+    };
+  }
+
+  protected mapRowToEntity(row: Record<string, unknown>): Session {
+    // Assuming row keys are already camelCase from Sequelize, or handle conversion if needed
+    return row as Session;
+  }
+
+  protected handleDatabaseError(error: unknown, operation: string): never {
+    console.error(`Database error during ${operation}:`, error);
+    throw new Error(`Database error: ${operation}`);
+  }
+
+  protected async ensureExists(id: string): Promise<Session> {
+    const entity = await this.findById(id);
+    if (!entity) {
+      throw new Error(`Session with id ${id} not found`);
+    }
+    return entity;
   }
 }

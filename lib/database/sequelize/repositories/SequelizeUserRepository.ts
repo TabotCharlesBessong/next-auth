@@ -1,17 +1,17 @@
 import { Op, Transaction, WhereOptions } from 'sequelize';
-import { AbstractBaseRepository } from '../../base/BaseRepository';
-import { User, UserRepository, QueryOptions, WhereClause, UpdateOptions, DeleteOptions, ValidationError } from '../../types';
+import { BaseRepository, User, UserRepository, QueryOptions, WhereClause, UpdateOptions, DeleteOptions, ValidationError } from '../../types';
 import { UserModel } from '../models';
+import { AbstractBaseRepository } from '../../base/AbstractBaseRepository'; // Import the new AbstractBaseRepository
 
 /**
  * Sequelize implementation of UserRepository
  */
 export class SequelizeUserRepository extends AbstractBaseRepository<User> implements UserRepository {
-  private userModel: typeof UserModel;
+  protected model: typeof UserModel; // Explicitly define model type
 
   constructor(userModel: typeof UserModel) {
-    super('users', userModel.sequelize);
-    this.userModel = userModel;
+    super(userModel); // Pass model to the AbstractBaseRepository constructor
+    this.model = userModel;
   }
 
   /**
@@ -41,7 +41,7 @@ export class SequelizeUserRepository extends AbstractBaseRepository<User> implem
         updatedAt: now,
       };
 
-      const user = await this.userModel.create(userData);
+      const user = await this.model.create(userData);
       return this.mapRowToEntity(user.toJSON());
     } catch (error) {
       this.handleDatabaseError(error, 'create user');
@@ -57,7 +57,7 @@ export class SequelizeUserRepository extends AbstractBaseRepository<User> implem
         return null;
       }
 
-      const user = await this.userModel.findByPk(id, {
+      const user = await this.model.findByPk(id, {
         attributes: this.buildSelectFields(),
         include: this.buildIncludeClause(options),
       });
@@ -77,7 +77,7 @@ export class SequelizeUserRepository extends AbstractBaseRepository<User> implem
         return null;
       }
 
-      const user = await this.userModel.findOne({
+      const user = await this.model.findOne({
         where: { email: email.toLowerCase() },
         attributes: { exclude: ['password'] },
       });
@@ -97,7 +97,7 @@ export class SequelizeUserRepository extends AbstractBaseRepository<User> implem
         return null;
       }
 
-      const user = await this.userModel.findOne({
+      const user = await this.model.findOne({
         where: { email: email.toLowerCase() },
       });
 
@@ -112,7 +112,7 @@ export class SequelizeUserRepository extends AbstractBaseRepository<User> implem
    */
   async findOne(where: WhereClause, options?: QueryOptions): Promise<User | null> {
     try {
-      const user = await this.userModel.findOne({
+      const user = await this.model.findOne({
         where: this.buildWhereClause(where),
         attributes: this.buildSelectFields(),
         include: this.buildIncludeClause(options),
@@ -132,7 +132,7 @@ export class SequelizeUserRepository extends AbstractBaseRepository<User> implem
     try {
       const { limit, offset } = this.buildLimitClause(options);
       
-      const users = await this.userModel.findAll({
+      const users = await this.model.findAll({
         where: where ? this.buildWhereClause(where) : undefined,
         attributes: this.buildSelectFields(),
         include: this.buildIncludeClause(options),
@@ -167,7 +167,7 @@ export class SequelizeUserRepository extends AbstractBaseRepository<User> implem
         updatedAt: this.getCurrentTimestamp(),
       };
 
-      const [affectedRows] = await this.userModel.update(updateData, {
+      const [affectedRows] = await this.model.update(updateData, {
         where: { id },
         returning: true,
       });
@@ -193,7 +193,7 @@ export class SequelizeUserRepository extends AbstractBaseRepository<User> implem
         updatedAt: this.getCurrentTimestamp(),
       };
 
-      const [affectedRows] = await this.userModel.update(updateData, {
+      const [affectedRows] = await this.model.update(updateData, {
         where: this.buildWhereClause(options.where),
       });
 
@@ -218,7 +218,7 @@ export class SequelizeUserRepository extends AbstractBaseRepository<User> implem
         return result !== null;
       } else {
         // Hard delete
-        const affectedRows = await this.userModel.destroy({
+        const affectedRows = await this.model.destroy({
           where: { id },
         });
         return affectedRows > 0;
@@ -238,7 +238,7 @@ export class SequelizeUserRepository extends AbstractBaseRepository<User> implem
         return await this.updateMany({ isActive: false }, options);
       } else {
         // Hard delete
-        const affectedRows = await this.userModel.destroy({
+        const affectedRows = await this.model.destroy({
           where: this.buildWhereClause(options.where),
         });
         return affectedRows;
@@ -253,7 +253,7 @@ export class SequelizeUserRepository extends AbstractBaseRepository<User> implem
    */
   async count(where?: WhereClause): Promise<number> {
     try {
-      return await this.userModel.count({
+      return await this.model.count({
         where: where ? this.buildWhereClause(where) : undefined,
       });
     } catch (error) {
@@ -266,7 +266,7 @@ export class SequelizeUserRepository extends AbstractBaseRepository<User> implem
    */
   async exists(where: WhereClause): Promise<boolean> {
     try {
-      const count = await this.userModel.count({
+      const count = await this.model.count({
         where: this.buildWhereClause(where),
       });
       return count > 0;
@@ -280,7 +280,7 @@ export class SequelizeUserRepository extends AbstractBaseRepository<User> implem
    */
   async updateLastLogin(id: string): Promise<void> {
     try {
-      await this.userModel.update(
+      await this.model.update(
         { lastLoginAt: this.getCurrentTimestamp() },
         { where: { id } }
       );
@@ -303,7 +303,7 @@ export class SequelizeUserRepository extends AbstractBaseRepository<User> implem
     try {
       const { limit, offset } = this.buildLimitClause(options);
       
-      const users = await this.userModel.findAll({
+      const users = await this.model.findAll({
         where: {
           [Op.or]: [
             { email: { [Op.iLike]: `%${query}%` } },
@@ -372,7 +372,7 @@ export class SequelizeUserRepository extends AbstractBaseRepository<User> implem
    * Executes a transaction
    */
   protected async executeTransaction<R>(callback: (trx: import('sequelize').Transaction | import('mongoose').ClientSession) => Promise<R>): Promise<R> {
-    return await this.userModel.sequelize!.transaction(callback);
+    return await (this.model as typeof UserModel).sequelize!.transaction(callback);
   }
 
   /**

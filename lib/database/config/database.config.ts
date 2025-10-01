@@ -35,22 +35,66 @@ const DatabaseConfigSchema = z.object({
  * Environment configuration schema
  */
 const EnvironmentConfigSchema = z.object({
-  DATABASE_PROVIDER: z.nativeEnum(DatabaseProvider),
-  DATABASE_URL: z.string().optional(),
-  DATABASE_HOST: z.string().optional(),
-  DATABASE_PORT: z.string().optional(),
-  DATABASE_NAME: z.string().optional(),
-  DATABASE_USERNAME: z.string().optional(),
-  DATABASE_PASSWORD: z.string().optional(),
-  DATABASE_SCHEMA: z.string().optional(),
-  DATABASE_AUTH_SOURCE: z.string().optional(),
-  DATABASE_SSL: z.string().optional(),
-  DATABASE_LOGGING: z.string().optional(),
-  DATABASE_POOL_MIN: z.string().optional(),
-  DATABASE_POOL_MAX: z.string().optional(),
-  DATABASE_POOL_IDLE: z.string().optional(),
-  DATABASE_POOL_ACQUIRE: z.string().optional(),
-  DATABASE_POOL_EVICT: z.string().optional()
+  // General DATABASE_PROVIDER is optional if specific provider variables are used
+  DATABASE_PROVIDER: z.nativeEnum(DatabaseProvider).optional(),
+
+  // PostgreSQL Specific
+  DATABASE_PROVIDER_PG: z.nativeEnum(DatabaseProvider).optional(),
+  DATABASE_HOST_PG: z.string().optional(),
+  DATABASE_PORT_PG: z.string().optional(),
+  DATABASE_NAME_PG: z.string().optional(),
+  DATABASE_USERNAME_PG: z.string().optional(),
+  DATABASE_PASSWORD_PG: z.string().optional(),
+  DATABASE_SCHEMA_PG: z.string().optional(),
+  DATABASE_SSL_PG: z.string().optional(),
+  DATABASE_LOGGING_PG: z.string().optional(),
+  DATABASE_POOL_MIN_PG: z.string().optional(),
+  DATABASE_POOL_MAX_PG: z.string().optional(),
+  DATABASE_POOL_IDLE_PG: z.string().optional(),
+  DATABASE_POOL_ACQUIRE_PG: z.string().optional(),
+  DATABASE_POOL_EVICT_PG: z.string().optional(),
+
+  // MySQL Specific (placeholder for future expansion if needed, using generic prefixes for now)
+  DATABASE_PROVIDER_MYSQL: z.nativeEnum(DatabaseProvider).optional(),
+  DATABASE_HOST_MYSQL: z.string().optional(),
+  DATABASE_PORT_MYSQL: z.string().optional(),
+  DATABASE_NAME_MYSQL: z.string().optional(),
+  DATABASE_USERNAME_MYSQL: z.string().optional(),
+  DATABASE_PASSWORD_MYSQL: z.string().optional(),
+  DATABASE_SCHEMA_MYSQL: z.string().optional(),
+  DATABASE_SSL_MYSQL: z.string().optional(),
+  DATABASE_LOGGING_MYSQL: z.string().optional(),
+  DATABASE_POOL_MIN_MYSQL: z.string().optional(),
+  DATABASE_POOL_MAX_MYSQL: z.string().optional(),
+  DATABASE_POOL_IDLE_MYSQL: z.string().optional(),
+  DATABASE_POOL_ACQUIRE_MYSQL: z.string().optional(),
+  DATABASE_POOL_EVICT_MYSQL: z.string().optional(),
+
+  // MongoDB Specific
+  DATABASE_PROVIDER_MONGODB: z.nativeEnum(DatabaseProvider).optional(),
+  DATABASE_URL_MONGODB: z.string().optional(),
+  DATABASE_HOST_MONGODB: z.string().optional(),
+  DATABASE_PORT_MONGODB: z.string().optional(),
+  DATABASE_NAME_MONGODB: z.string().optional(),
+  DATABASE_USERNAME_MONGODB: z.string().optional(),
+  DATABASE_PASSWORD_MONGODB: z.string().optional(),
+  DATABASE_AUTH_SOURCE_MONGODB: z.string().optional(),
+  DATABASE_SSL_MONGODB: z.string().optional(),
+  DATABASE_LOGGING_MONGODB: z.string().optional(),
+  DATABASE_POOL_MIN_MONGODB: z.string().optional(),
+  DATABASE_POOL_MAX_MONGODB: z.string().optional(),
+  DATABASE_POOL_IDLE_MONGODB: z.string().optional(),
+  DATABASE_POOL_ACQUIRE_MONGODB: z.string().optional(),
+  DATABASE_POOL_EVICT_MONGODB: z.string().optional(),
+
+  // Read Replica specific
+  DATABASE_READ_HOST: z.string().optional(),
+  DATABASE_READ_PORT: z.string().optional(),
+  DATABASE_READ_USERNAME: z.string().optional(),
+  DATABASE_READ_PASSWORD: z.string().optional(),
+
+  // Cache Database specific
+  CACHE_DATABASE_URL: z.string().optional(),
 });
 
 /**
@@ -59,7 +103,8 @@ const EnvironmentConfigSchema = z.object({
 export class DatabaseConfigManager {
   private static instance: DatabaseConfigManager;
   private config: DatabaseConfig | null = null;
-  private envConfig: Record<string, string> = {};
+  // Change envConfig type to allow for string | undefined to match process.env
+  private envConfig: Record<string, string | undefined> = {};
 
   private constructor() {
     this.loadEnvironmentVariables();
@@ -116,70 +161,28 @@ export class DatabaseConfigManager {
    */
   createConfigFromEnvironment(): DatabaseConfig {
     const env = this.getValidatedEnvironment();
-    const provider = env.DATABASE_PROVIDER as DatabaseProvider;
-
-    const baseConfig = {
-      provider,
-      ssl: this.parseBoolean(env.DATABASE_SSL, false),
-      logging: this.parseBoolean(env.DATABASE_LOGGING, false),
-      pool: {
-        min: this.parseNumber(env.DATABASE_POOL_MIN, 0),
-        max: this.parseNumber(env.DATABASE_POOL_MAX, 10),
-        idle: this.parseNumber(env.DATABASE_POOL_IDLE, 10000),
-        acquire: this.parseNumber(env.DATABASE_POOL_ACQUIRE, 60000),
-        evict: this.parseNumber(env.DATABASE_POOL_EVICT, 1000)
+    
+    // Determine the primary database provider based on explicitly set provider or inference
+    let provider: DatabaseProvider | undefined = env.DATABASE_PROVIDER as DatabaseProvider;
+    
+    // If a general DATABASE_PROVIDER is not set, try to infer from specific providers
+    if (!provider) {
+      if (env.DATABASE_PROVIDER_PG) {
+        provider = DatabaseProvider.POSTGRESQL;
+      } else if (env.DATABASE_PROVIDER_MONGODB) {
+        provider = DatabaseProvider.MONGODB;
+      } else if (env.DATABASE_PROVIDER_MYSQL) {
+        provider = DatabaseProvider.MYSQL;
       }
-    };
-
-    let config: DatabaseConfig;
-
-    switch (provider) {
-      case DatabaseProvider.POSTGRESQL:
-        config = {
-          ...baseConfig,
-          host: env.DATABASE_HOST || 'localhost',
-          port: this.parseNumber(env.DATABASE_PORT, 5432),
-          database: env.DATABASE_NAME || 'nextauth',
-          username: env.DATABASE_USERNAME || 'postgres',
-          password: env.DATABASE_PASSWORD || '',
-          schema: env.DATABASE_SCHEMA || 'public'
-        };
-        break;
-
-      case DatabaseProvider.MYSQL:
-        config = {
-          ...baseConfig,
-          host: env.DATABASE_HOST || 'localhost',
-          port: this.parseNumber(env.DATABASE_PORT, 3306),
-          database: env.DATABASE_NAME || 'nextauth',
-          username: env.DATABASE_USERNAME || 'root',
-          password: env.DATABASE_PASSWORD || ''
-        };
-        break;
-
-      case DatabaseProvider.MONGODB:
-        if (env.DATABASE_URL) {
-          config = {
-            ...baseConfig,
-            url: env.DATABASE_URL
-          };
-        } else {
-          config = {
-            ...baseConfig,
-            host: env.DATABASE_HOST || 'localhost',
-            port: this.parseNumber(env.DATABASE_PORT, 27017),
-            database: env.DATABASE_NAME || 'nextauth',
-            username: env.DATABASE_USERNAME,
-            password: env.DATABASE_PASSWORD,
-            authSource: env.DATABASE_AUTH_SOURCE || 'admin'
-          };
-        }
-        break;
-
-      default:
-        throw new Error(`Unsupported database provider: ${provider}`);
     }
 
+    if (!provider) {
+      throw new Error('No database provider specified in environment variables.');
+    }
+
+    // Now call the new helper method to create the specific config
+    const config = this.createConfigFromEnvironmentForProvider(provider);
+    
     this.validateConfig(config);
     return config;
   }
@@ -190,7 +193,24 @@ export class DatabaseConfigManager {
   getConnectionString(config?: DatabaseConfig): string {
     const dbConfig = config || this.getConfig();
 
-    switch (dbConfig.provider) {
+    // Handle cases where DATABASE_PROVIDER is not set, but specific provider variables are
+    let currentProvider = dbConfig.provider;
+    if (!currentProvider) {
+      // Attempt to infer provider from available specific configs in the environment
+      if (this.envConfig.DATABASE_PROVIDER_PG) {
+        currentProvider = DatabaseProvider.POSTGRESQL;
+      } else if (this.envConfig.DATABASE_PROVIDER_MONGODB) {
+        currentProvider = DatabaseProvider.MONGODB;
+      } else if (this.envConfig.DATABASE_PROVIDER_MYSQL) {
+        currentProvider = DatabaseProvider.MYSQL;
+      }
+    }
+
+    if (!currentProvider) {
+      throw new Error('Cannot determine database provider for connection string.');
+    }
+
+    switch (currentProvider) {
       case DatabaseProvider.POSTGRESQL:
         return this.buildPostgreSQLConnectionString(dbConfig);
       
@@ -201,7 +221,7 @@ export class DatabaseConfigManager {
         return this.buildMongoDBConnectionString(dbConfig);
       
       default:
-        throw new Error(`Unsupported database provider: ${dbConfig.provider}`);
+        throw new Error(`Unsupported database provider: ${currentProvider}`);
     }
   }
 
@@ -209,40 +229,76 @@ export class DatabaseConfigManager {
    * Gets database configuration for different environments
    */
   getEnvironmentConfig(environment: 'development' | 'test' | 'production'): DatabaseConfig {
+    // This method needs to be revisited for multi-database configurations if different environment settings are desired per DB.
+    // For now, it will return a single primary config, or default if no specific provider is set.
     const baseConfig = this.getConfig();
-    
+
+    // Determine which provider's environment variables to prioritize for general settings
+    // For simplicity, we prioritize PG, then Mongo, then MySQL for general env configs if multiple exist
+    // This logic might need refinement based on exact multi-DB usage patterns.
+    let selectedEnv = this.envConfig.DATABASE_PROVIDER_PG ? 'PG' :
+                      this.envConfig.DATABASE_PROVIDER_MONGODB ? 'MONGODB' :
+                      this.envConfig.DATABASE_PROVIDER_MYSQL ? 'MYSQL' : '';
+
     switch (environment) {
       case 'development':
+        const devLogging = selectedEnv === 'PG' ? this.parseBoolean(this.envConfig.DATABASE_LOGGING_PG, true) :
+                             selectedEnv === 'MONGODB' ? this.parseBoolean(this.envConfig.DATABASE_LOGGING_MONGODB, true) :
+                             selectedEnv === 'MYSQL' ? this.parseBoolean(this.envConfig.DATABASE_LOGGING_MYSQL, true) : true;
+        const devMaxPool = selectedEnv === 'PG' ? this.parseNumber(this.envConfig.DATABASE_POOL_MAX_PG, 5) :
+                           selectedEnv === 'MONGODB' ? this.parseNumber(this.envConfig.DATABASE_POOL_MAX_MONGODB, 5) :
+                           selectedEnv === 'MYSQL' ? this.parseNumber(this.envConfig.DATABASE_POOL_MAX_MYSQL, 5) : 5;
         return {
           ...baseConfig,
-          logging: true,
+          logging: devLogging,
           pool: {
             ...baseConfig.pool,
-            max: 5
+            max: devMaxPool
           }
         };
       
       case 'test':
+        const testLogging = selectedEnv === 'PG' ? this.parseBoolean(this.envConfig.DATABASE_LOGGING_PG, false) :
+                              selectedEnv === 'MONGODB' ? this.parseBoolean(this.envConfig.DATABASE_LOGGING_MONGODB, false) :
+                              selectedEnv === 'MYSQL' ? this.parseBoolean(this.envConfig.DATABASE_LOGGING_MYSQL, false) : false;
+        const testMinPool = selectedEnv === 'PG' ? this.parseNumber(this.envConfig.DATABASE_POOL_MIN_PG, 0) :
+                            selectedEnv === 'MONGODB' ? this.parseNumber(this.envConfig.DATABASE_POOL_MIN_MONGODB, 0) :
+                            selectedEnv === 'MYSQL' ? this.parseNumber(this.envConfig.DATABASE_POOL_MIN_MYSQL, 0) : 0;
+        const testMaxPool = selectedEnv === 'PG' ? this.parseNumber(this.envConfig.DATABASE_POOL_MAX_PG, 3) :
+                            selectedEnv === 'MONGODB' ? this.parseNumber(this.envConfig.DATABASE_POOL_MAX_MONGODB, 3) :
+                            selectedEnv === 'MYSQL' ? this.parseNumber(this.envConfig.DATABASE_POOL_MAX_MYSQL, 3) : 3;
         return {
           ...baseConfig,
           database: `${baseConfig.database}_test`,
-          logging: false,
+          logging: testLogging,
           pool: {
             ...baseConfig.pool,
-            min: 0,
-            max: 3
+            min: testMinPool,
+            max: testMaxPool
           }
         };
       
       case 'production':
+        const prodSsl = selectedEnv === 'PG' ? this.parseBoolean(this.envConfig.DATABASE_SSL_PG, true) :
+                            selectedEnv === 'MONGODB' ? this.parseBoolean(this.envConfig.DATABASE_SSL_MONGODB, true) :
+                            selectedEnv === 'MYSQL' ? this.parseBoolean(this.envConfig.DATABASE_SSL_MYSQL, true) : true;
+        const prodLogging = selectedEnv === 'PG' ? this.parseBoolean(this.envConfig.DATABASE_LOGGING_PG, false) :
+                              selectedEnv === 'MONGODB' ? this.parseBoolean(this.envConfig.DATABASE_LOGGING_MONGODB, false) :
+                              selectedEnv === 'MYSQL' ? this.parseBoolean(this.envConfig.DATABASE_LOGGING_MYSQL, false) : false;
+        const prodMinPool = selectedEnv === 'PG' ? this.parseNumber(this.envConfig.DATABASE_POOL_MIN_PG, 2) :
+                            selectedEnv === 'MONGODB' ? this.parseNumber(this.envConfig.DATABASE_POOL_MIN_MONGODB, 2) :
+                            selectedEnv === 'MYSQL' ? this.parseNumber(this.envConfig.DATABASE_POOL_MIN_MYSQL, 2) : 2;
+        const prodMaxPool = selectedEnv === 'PG' ? this.parseNumber(this.envConfig.DATABASE_POOL_MAX_PG, 20) :
+                            selectedEnv === 'MONGODB' ? this.parseNumber(this.envConfig.DATABASE_POOL_MAX_MONGODB, 20) :
+                            selectedEnv === 'MYSQL' ? this.parseNumber(this.envConfig.DATABASE_POOL_MAX_MYSQL, 20) : 20;
         return {
           ...baseConfig,
-          ssl: true,
-          logging: false,
+          ssl: prodSsl,
+          logging: prodLogging,
           pool: {
             ...baseConfig.pool,
-            min: 2,
-            max: 20
+            min: prodMinPool,
+            max: prodMaxPool
           }
         };
       
@@ -257,25 +313,68 @@ export class DatabaseConfigManager {
   getMultiDatabaseConfig(): Record<string, DatabaseConfig> {
     const configs: Record<string, DatabaseConfig> = {};
     
-    // Primary database
-    configs.primary = this.getConfig();
-    
-    // Read replica (if configured)
-    if (this.envConfig.DATABASE_READ_HOST) {
+    // Primary PostgreSQL database (if configured)
+    if (this.envConfig.DATABASE_PROVIDER_PG || this.envConfig.DATABASE_HOST_PG) {
+      try {
+        configs.postgresql = this.createConfigFromEnvironmentForProvider(DatabaseProvider.POSTGRESQL);
+      } catch (error) {
+        console.warn(`⚠️ Could not create PostgreSQL config: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    // Primary MongoDB database (if configured)
+    if (this.envConfig.DATABASE_PROVIDER_MONGODB || this.envConfig.DATABASE_URL_MONGODB || this.envConfig.DATABASE_HOST_MONGODB) {
+      try {
+        configs.mongodb = this.createConfigFromEnvironmentForProvider(DatabaseProvider.MONGODB);
+      } catch (error) {
+        console.warn(`⚠️ Could not create MongoDB config: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    // Primary MySQL database (if configured)
+    if (this.envConfig.DATABASE_PROVIDER_MYSQL || this.envConfig.DATABASE_HOST_MYSQL) {
+      try {
+        configs.mysql = this.createConfigFromEnvironmentForProvider(DatabaseProvider.MYSQL);
+      } catch (error) {
+        console.warn(`⚠️ Could not create MySQL config: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    // Determine which config to set as the 'primary' if multiple are configured.
+    // This logic can be adjusted based on specific application requirements.
+    const configuredProviders = Object.keys(configs);
+
+    if (configuredProviders.length === 1) {
+      configs.primary = configs[configuredProviders[0]];
+    } else if (configuredProviders.length > 1) {
+      // If DATABASE_PROVIDER is explicitly set, use that as primary
+      if (this.envConfig.DATABASE_PROVIDER && configs[this.envConfig.DATABASE_PROVIDER]) {
+        configs.primary = configs[this.envConfig.DATABASE_PROVIDER];
+      } else if (configs.postgresql) {
+        configs.primary = configs.postgresql; // Default to PostgreSQL if multiple and no general provider
+      } else if (configs.mongodb) {
+        configs.primary = configs.mongodb; // Default to MongoDB if multiple and no general provider
+      } else if (configs.mysql) {
+        configs.primary = configs.mysql; // Default to MySQL if multiple and no general provider
+      } 
+    }
+
+    // Read replica (apply to the determined primary if configured)
+    if (configs.primary && this.envConfig.DATABASE_READ_HOST) {
       configs.read = {
         ...configs.primary,
-        host: this.envConfig.DATABASE_READ_HOST,
+        host: this.envConfig.DATABASE_READ_HOST as string,
         port: this.parseNumber(this.envConfig.DATABASE_READ_PORT, configs.primary.port || 5432),
         username: this.envConfig.DATABASE_READ_USERNAME || configs.primary.username,
         password: this.envConfig.DATABASE_READ_PASSWORD || configs.primary.password
       };
     }
-    
+
     // Cache database (Redis/MongoDB)
     if (this.envConfig.CACHE_DATABASE_URL) {
       configs.cache = {
         provider: DatabaseProvider.MONGODB, // or Redis when supported
-        url: this.envConfig.CACHE_DATABASE_URL,
+        url: this.envConfig.CACHE_DATABASE_URL as string,
         ssl: false,
         logging: false,
         pool: {
@@ -292,31 +391,178 @@ export class DatabaseConfigManager {
   }
 
   /**
+   * Helper to create a specific provider's config from environment variables.
+   * This helps in `getMultiDatabaseConfig` to build configs for each provider independently.
+   */
+  private createConfigFromEnvironmentForProvider(provider: DatabaseProvider): DatabaseConfig {
+    const env = this.envConfig; // Use raw envConfig here, validation happens at the end
+
+    const baseConfig: Partial<DatabaseConfig> = {
+      provider,
+      pool: {
+        min: 0,
+        max: 10,
+        idle: 10000,
+        acquire: 60000,
+        evict: 1000
+      }
+    };
+
+    let config: DatabaseConfig;
+
+    switch (provider) {
+      case DatabaseProvider.POSTGRESQL:
+        config = {
+          ...baseConfig,
+          host: env.DATABASE_HOST_PG || 'localhost',
+          port: this.parseNumber(env.DATABASE_PORT_PG, 5432),
+          database: env.DATABASE_NAME_PG || 'nextauth',
+          username: env.DATABASE_USERNAME_PG || 'postgres',
+          password: env.DATABASE_PASSWORD_PG || '',
+          schema: env.DATABASE_SCHEMA_PG || 'public',
+          ssl: this.parseBoolean(env.DATABASE_SSL_PG, false),
+          logging: this.parseBoolean(env.DATABASE_LOGGING_PG, false),
+          pool: {
+            min: this.parseNumber(env.DATABASE_POOL_MIN_PG, 0),
+            max: this.parseNumber(env.DATABASE_POOL_MAX_PG, 10),
+            idle: this.parseNumber(env.DATABASE_POOL_IDLE_PG, 10000),
+            acquire: this.parseNumber(env.DATABASE_POOL_ACQUIRE_PG, 60000),
+            evict: this.parseNumber(env.DATABASE_POOL_EVICT_PG, 1000)
+          }
+        } as DatabaseConfig;
+        break;
+
+      case DatabaseProvider.MYSQL:
+        config = {
+          ...baseConfig,
+          host: env.DATABASE_HOST_MYSQL || 'localhost',
+          port: this.parseNumber(env.DATABASE_PORT_MYSQL, 3306),
+          database: env.DATABASE_NAME_MYSQL || 'nextauth',
+          username: env.DATABASE_USERNAME_MYSQL || 'root',
+          password: env.DATABASE_PASSWORD_MYSQL || '',
+          schema: env.DATABASE_SCHEMA_MYSQL || undefined, // MySQL schema is optional and often corresponds to database name
+          ssl: this.parseBoolean(env.DATABASE_SSL_MYSQL, false),
+          logging: this.parseBoolean(env.DATABASE_LOGGING_MYSQL, false),
+          pool: {
+            min: this.parseNumber(env.DATABASE_POOL_MIN_MYSQL, 0),
+            max: this.parseNumber(env.DATABASE_POOL_MAX_MYSQL, 10),
+            idle: this.parseNumber(env.DATABASE_POOL_IDLE_MYSQL, 10000),
+            acquire: this.parseNumber(env.DATABASE_POOL_ACQUIRE_MYSQL, 60000),
+            evict: this.parseNumber(env.DATABASE_POOL_EVICT_MYSQL, 1000)
+          }
+        } as DatabaseConfig;
+        break;
+
+      case DatabaseProvider.MONGODB:
+        if (env.DATABASE_URL_MONGODB) {
+          config = {
+            ...baseConfig,
+            url: env.DATABASE_URL_MONGODB,
+            ssl: this.parseBoolean(env.DATABASE_SSL_MONGODB, false),
+            logging: this.parseBoolean(env.DATABASE_LOGGING_MONGODB, false),
+            pool: {
+              min: this.parseNumber(env.DATABASE_POOL_MIN_MONGODB, 0),
+              max: this.parseNumber(env.DATABASE_POOL_MAX_MONGODB, 10),
+              idle: this.parseNumber(env.DATABASE_POOL_IDLE_MONGODB, 10000),
+              acquire: this.parseNumber(env.DATABASE_POOL_ACQUIRE_MONGODB, 60000),
+              evict: this.parseNumber(env.DATABASE_POOL_EVICT_MONGODB, 1000)
+            }
+          } as DatabaseConfig;
+        } else {
+          config = {
+            ...baseConfig,
+            host: env.DATABASE_HOST_MONGODB || 'localhost',
+            port: this.parseNumber(env.DATABASE_PORT_MONGODB, 27017),
+            database: env.DATABASE_NAME_MONGODB || 'nextauth',
+            username: env.DATABASE_USERNAME_MONGODB,
+            password: env.DATABASE_PASSWORD_MONGODB,
+            authSource: env.DATABASE_AUTH_SOURCE_MONGODB || 'admin',
+            ssl: this.parseBoolean(env.DATABASE_SSL_MONGODB, false),
+            logging: this.parseBoolean(env.DATABASE_LOGGING_MONGODB, false),
+            pool: {
+              min: this.parseNumber(env.DATABASE_POOL_MIN_MONGODB, 0),
+              max: this.parseNumber(env.DATABASE_POOL_MAX_MONGODB, 10),
+              idle: this.parseNumber(env.DATABASE_POOL_IDLE_MONGODB, 10000),
+              acquire: this.parseNumber(env.DATABASE_POOL_ACQUIRE_MONGODB, 60000),
+              evict: this.parseNumber(env.DATABASE_POOL_EVICT_MONGODB, 1000)
+            }
+          } as DatabaseConfig;
+        }
+        break;
+
+      default:
+        throw new Error(`Unsupported database provider: ${provider}`);
+    }
+
+    this.validateConfig(config);
+    return config;
+  }
+
+  /**
    * Loads environment variables
    */
   private loadEnvironmentVariables(): void {
     this.envConfig = {
-      DATABASE_PROVIDER: process.env.DATABASE_PROVIDER || '',
-      DATABASE_URL: process.env.DATABASE_URL || '',
-      DATABASE_HOST: process.env.DATABASE_HOST || '',
-      DATABASE_PORT: process.env.DATABASE_PORT || '',
-      DATABASE_NAME: process.env.DATABASE_NAME || '',
-      DATABASE_USERNAME: process.env.DATABASE_USERNAME || '',
-      DATABASE_PASSWORD: process.env.DATABASE_PASSWORD || '',
-      DATABASE_SCHEMA: process.env.DATABASE_SCHEMA || '',
-      DATABASE_AUTH_SOURCE: process.env.DATABASE_AUTH_SOURCE || '',
-      DATABASE_SSL: process.env.DATABASE_SSL || '',
-      DATABASE_LOGGING: process.env.DATABASE_LOGGING || '',
-      DATABASE_POOL_MIN: process.env.DATABASE_POOL_MIN || '',
-      DATABASE_POOL_MAX: process.env.DATABASE_POOL_MAX || '',
-      DATABASE_POOL_IDLE: process.env.DATABASE_POOL_IDLE || '',
-      DATABASE_POOL_ACQUIRE: process.env.DATABASE_POOL_ACQUIRE || '',
-      DATABASE_POOL_EVICT: process.env.DATABASE_POOL_EVICT || '',
-      DATABASE_READ_HOST: process.env.DATABASE_READ_HOST || '',
-      DATABASE_READ_PORT: process.env.DATABASE_READ_PORT || '',
-      DATABASE_READ_USERNAME: process.env.DATABASE_READ_USERNAME || '',
-      DATABASE_READ_PASSWORD: process.env.DATABASE_READ_PASSWORD || '',
-      CACHE_DATABASE_URL: process.env.CACHE_DATABASE_URL || ''
+      // General provider
+      DATABASE_PROVIDER: process.env.DATABASE_PROVIDER,
+
+      // PostgreSQL Specific
+      DATABASE_PROVIDER_PG: process.env.DATABASE_PROVIDER_PG,
+      DATABASE_HOST_PG: process.env.DATABASE_HOST_PG,
+      DATABASE_PORT_PG: process.env.DATABASE_PORT_PG,
+      DATABASE_NAME_PG: process.env.DATABASE_NAME_PG,
+      DATABASE_USERNAME_PG: process.env.DATABASE_USERNAME_PG,
+      DATABASE_PASSWORD_PG: process.env.DATABASE_PASSWORD_PG,
+      DATABASE_SCHEMA_PG: process.env.DATABASE_SCHEMA_PG,
+      DATABASE_SSL_PG: process.env.DATABASE_SSL_PG,
+      DATABASE_LOGGING_PG: process.env.DATABASE_LOGGING_PG,
+      DATABASE_POOL_MIN_PG: process.env.DATABASE_POOL_MIN_PG,
+      DATABASE_POOL_MAX_PG: process.env.DATABASE_POOL_MAX_PG,
+      DATABASE_POOL_IDLE_PG: process.env.DATABASE_POOL_IDLE_PG,
+      DATABASE_POOL_ACQUIRE_PG: process.env.DATABASE_POOL_ACQUIRE_PG,
+      DATABASE_POOL_EVICT_PG: process.env.DATABASE_POOL_EVICT_PG,
+
+      // MySQL Specific (placeholder for future expansion)
+      DATABASE_PROVIDER_MYSQL: process.env.DATABASE_PROVIDER_MYSQL,
+      DATABASE_HOST_MYSQL: process.env.DATABASE_HOST_MYSQL,
+      DATABASE_PORT_MYSQL: process.env.DATABASE_PORT_MYSQL,
+      DATABASE_NAME_MYSQL: process.env.DATABASE_NAME_MYSQL,
+      DATABASE_USERNAME_MYSQL: process.env.DATABASE_USERNAME_MYSQL,
+      DATABASE_PASSWORD_MYSQL: process.env.DATABASE_PASSWORD_MYSQL,
+      DATABASE_SCHEMA_MYSQL: process.env.DATABASE_SCHEMA_MYSQL,
+      DATABASE_SSL_MYSQL: process.env.DATABASE_SSL_MYSQL,
+      DATABASE_LOGGING_MYSQL: process.env.DATABASE_LOGGING_MYSQL,
+      DATABASE_POOL_MIN_MYSQL: process.env.DATABASE_POOL_MIN_MYSQL,
+      DATABASE_POOL_MAX_MYSQL: process.env.DATABASE_POOL_MAX_MYSQL,
+      DATABASE_POOL_IDLE_MYSQL: process.env.DATABASE_POOL_IDLE_MYSQL,
+      DATABASE_POOL_ACQUIRE_MYSQL: process.env.DATABASE_POOL_ACQUIRE_MYSQL,
+      DATABASE_POOL_EVICT_MYSQL: process.env.DATABASE_POOL_EVICT_MYSQL,
+
+      // MongoDB Specific
+      DATABASE_PROVIDER_MONGODB: process.env.DATABASE_PROVIDER_MONGODB,
+      DATABASE_URL_MONGODB: process.env.DATABASE_URL_MONGODB,
+      DATABASE_HOST_MONGODB: process.env.DATABASE_HOST_MONGODB,
+      DATABASE_PORT_MONGODB: process.env.DATABASE_PORT_MONGODB,
+      DATABASE_NAME_MONGODB: process.env.DATABASE_NAME_MONGODB,
+      DATABASE_USERNAME_MONGODB: process.env.DATABASE_USERNAME_MONGODB,
+      DATABASE_PASSWORD_MONGODB: process.env.DATABASE_PASSWORD_MONGODB,
+      DATABASE_AUTH_SOURCE_MONGODB: process.env.DATABASE_AUTH_SOURCE_MONGODB,
+      DATABASE_SSL_MONGODB: process.env.DATABASE_SSL_MONGODB,
+      DATABASE_LOGGING_MONGODB: process.env.DATABASE_LOGGING_MONGODB,
+      DATABASE_POOL_MIN_MONGODB: process.env.DATABASE_POOL_MIN_MONGODB,
+      DATABASE_POOL_MAX_MONGODB: process.env.DATABASE_POOL_MAX_MONGODB,
+      DATABASE_POOL_IDLE_MONGODB: process.env.DATABASE_POOL_IDLE_MONGODB,
+      DATABASE_POOL_ACQUIRE_MONGODB: process.env.DATABASE_POOL_ACQUIRE_MONGODB,
+      DATABASE_POOL_EVICT_MONGODB: process.env.DATABASE_POOL_EVICT_MONGODB,
+
+      // Read Replica
+      DATABASE_READ_HOST: process.env.DATABASE_READ_HOST,
+      DATABASE_READ_PORT: process.env.DATABASE_READ_PORT,
+      DATABASE_READ_USERNAME: process.env.DATABASE_READ_USERNAME,
+      DATABASE_READ_PASSWORD: process.env.DATABASE_READ_PASSWORD,
+
+      // Cache Database
+      CACHE_DATABASE_URL: process.env.CACHE_DATABASE_URL,
     };
   }
 
@@ -325,7 +571,12 @@ export class DatabaseConfigManager {
    */
   private getValidatedEnvironment(): Record<string, string> {
     try {
-      return EnvironmentConfigSchema.parse(this.envConfig) as Record<string, string>;
+      // Explicitly filter for defined environment variables before parsing
+      const definedEnvConfig: Record<string, string> = Object.entries(this.envConfig)
+        .filter(([, value]) => value !== undefined && value !== '')
+        .reduce((acc, [key, value]) => ({ ...acc, [key]: value }), {});
+
+      return EnvironmentConfigSchema.parse(definedEnvConfig) as Record<string, string>;
     } catch (error) {
       if (error instanceof z.ZodError) {
         const issues = error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`).join(', ');
@@ -346,7 +597,7 @@ export class DatabaseConfigManager {
           throw new Error('Host, port, database, and username are required for SQL databases');
         }
         break;
-      
+
       case DatabaseProvider.MONGODB:
         if (!config.url && (!config.host || !config.database)) {
           throw new Error('Either URL or host and database are required for MongoDB');
@@ -361,21 +612,21 @@ export class DatabaseConfigManager {
   private buildPostgreSQLConnectionString(config: DatabaseConfig): string {
     const { host, port, database, username, password, ssl, schema } = config;
     let connectionString = `postgresql://${username}`;
-    
+
     if (password) {
       connectionString += `:${password}`;
     }
-    
+
     connectionString += `@${host}:${port}/${database}`;
-    
+
     const params: string[] = [];
     if (ssl) params.push('sslmode=require');
     if (schema && schema !== 'public') params.push(`schema=${schema}`);
-    
+
     if (params.length > 0) {
       connectionString += `?${params.join('&')}`;
     }
-    
+
     return connectionString;
   }
 
@@ -385,20 +636,20 @@ export class DatabaseConfigManager {
   private buildMySQLConnectionString(config: DatabaseConfig): string {
     const { host, port, database, username, password, ssl } = config;
     let connectionString = `mysql://${username}`;
-    
+
     if (password) {
       connectionString += `:${password}`;
     }
-    
+
     connectionString += `@${host}:${port}/${database}`;
-    
+
     const params: string[] = [];
     if (ssl) params.push('ssl=true');
-    
+
     if (params.length > 0) {
       connectionString += `?${params.join('&')}`;
     }
-    
+
     return connectionString;
   }
 
@@ -409,10 +660,10 @@ export class DatabaseConfigManager {
     if (config.url) {
       return config.url;
     }
-    
+
     const { host, port, database, username, password, ssl, authSource } = config;
     let connectionString = 'mongodb://';
-    
+
     if (username) {
       connectionString += username;
       if (password) {
@@ -420,17 +671,17 @@ export class DatabaseConfigManager {
       }
       connectionString += '@';
     }
-    
+
     connectionString += `${host}:${port}/${database}`;
-    
+
     const params: string[] = [];
     if (ssl) params.push('ssl=true');
     if (authSource) params.push(`authSource=${authSource}`);
-    
+
     if (params.length > 0) {
       connectionString += `?${params.join('&')}`;
     }
-    
+
     return connectionString;
   }
 
@@ -496,7 +747,7 @@ export const DatabasePresets = {
       logging: true,
       pool: { min: 0, max: 5, idle: 10000, acquire: 60000, evict: 1000 }
     } as DatabaseConfig,
-    
+
     mysql: {
       provider: DatabaseProvider.MYSQL,
       host: 'localhost',
@@ -508,7 +759,7 @@ export const DatabasePresets = {
       logging: true,
       pool: { min: 0, max: 5, idle: 10000, acquire: 60000, evict: 1000 }
     } as DatabaseConfig,
-    
+
     mongodb: {
       provider: DatabaseProvider.MONGODB,
       host: 'localhost',
@@ -519,7 +770,7 @@ export const DatabasePresets = {
       pool: { min: 0, max: 5, idle: 10000, acquire: 60000, evict: 1000 }
     } as DatabaseConfig
   },
-  
+
   test: {
     postgresql: {
       provider: DatabaseProvider.POSTGRESQL,
@@ -532,7 +783,7 @@ export const DatabasePresets = {
       logging: false,
       pool: { min: 0, max: 3, idle: 10000, acquire: 60000, evict: 1000 }
     } as DatabaseConfig,
-    
+
     mysql: {
       provider: DatabaseProvider.MYSQL,
       host: 'localhost',
@@ -544,7 +795,7 @@ export const DatabasePresets = {
       logging: false,
       pool: { min: 0, max: 3, idle: 10000, acquire: 60000, evict: 1000 }
     } as DatabaseConfig,
-    
+
     mongodb: {
       provider: DatabaseProvider.MONGODB,
       host: 'localhost',

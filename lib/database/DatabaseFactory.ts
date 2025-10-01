@@ -9,6 +9,18 @@ import { MongooseSessionRepository } from './mongoose/repositories/MongooseSessi
 import { MongooseSocialAccountRepository } from './mongoose/repositories/MongooseSocialAccountRepository';
 import { UserModel as SequelizeUserModel, SessionModel as SequelizeSessionModel, SocialAccountModel as SequelizeSocialAccountModel } from './sequelize/models';
 import { UserModel as MongooseUserModel, SessionModel as MongooseSessionModel, SocialAccountModel as MongooseSocialAccountModel } from './mongoose/models';
+import { DatabaseConfigManager } from './config/database.config';
+import { RefreshTokenRepository } from './types';
+import { SequelizeRefreshTokenRepository } from './sequelize/repositories/SequelizeRefreshTokenRepository';
+import { MongooseRefreshTokenRepository } from './mongoose/repositories/MongooseRefreshTokenRepository';
+import { EmailTokenRepository } from './types';
+import { SequelizeEmailTokenRepository } from './sequelize/repositories/SequelizeEmailTokenRepository';
+import { MongooseEmailTokenRepository } from './mongoose/repositories/MongooseEmailTokenRepository';
+import { EmailVerificationModel as SequelizeEmailVerificationModel } from './sequelize/models';
+import { EmailVerificationModel as MongooseEmailVerificationModel } from './mongoose/models';
+import { RefreshTokenModel as SequelizeRefreshTokenModel } from './sequelize/models/RefreshToken'; // Import Sequelize RefreshTokenModel
+// import { RefreshTokenModel as MongooseRefreshTokenModel } from './mongoose/models';   // Import Mongoose RefreshTokenModel
+import { RefreshTokenModel as MongooseRefreshTokenModel } from "./mongoose/models/RefreshToken"
 
 /**
  * Database factory for creating database connections and repositories
@@ -20,6 +32,8 @@ export class DatabaseFactory {
     user: UserRepository;
     session: SessionRepository;
     socialAccount: SocialAccountRepository;
+    refreshToken: RefreshTokenRepository;
+    emailTokens: EmailTokenRepository;
   }> = new Map();
   private currentConfig: DatabaseConfig | null = null;
 
@@ -78,6 +92,8 @@ export class DatabaseFactory {
     user: UserRepository;
     session: SessionRepository;
     socialAccount: SocialAccountRepository;
+    refreshToken: RefreshTokenRepository;
+    emailTokens: EmailTokenRepository;
   }> {
     const connectionKey = this.getConnectionKey(config);
     
@@ -93,6 +109,8 @@ export class DatabaseFactory {
       user: UserRepository;
       session: SessionRepository;
       socialAccount: SocialAccountRepository;
+      refreshToken: RefreshTokenRepository;
+      emailTokens: EmailTokenRepository;
     };
 
     switch (config.provider) {
@@ -101,7 +119,9 @@ export class DatabaseFactory {
         repositories = {
           user: new SequelizeUserRepository(SequelizeUserModel),
           session: new SequelizeSessionRepository(SequelizeSessionModel),
-          socialAccount: new SequelizeSocialAccountRepository(SequelizeSocialAccountModel)
+          socialAccount: new SequelizeSocialAccountRepository(SequelizeSocialAccountModel),
+          refreshToken: new SequelizeRefreshTokenRepository(SequelizeRefreshTokenModel), // Use SequelizeRefreshTokenModel
+          emailTokens: new SequelizeEmailTokenRepository(SequelizeEmailVerificationModel),
         };
         break;
       
@@ -109,7 +129,9 @@ export class DatabaseFactory {
         repositories = {
           user: new MongooseUserRepository(MongooseUserModel),
           session: new MongooseSessionRepository(MongooseSessionModel),
-          socialAccount: new MongooseSocialAccountRepository(MongooseSocialAccountModel)
+          socialAccount: new MongooseSocialAccountRepository(MongooseSocialAccountModel),
+          refreshToken: new MongooseRefreshTokenRepository(MongooseRefreshTokenModel), // Use MongooseRefreshTokenModel
+          emailTokens: new MongooseEmailTokenRepository(MongooseEmailVerificationModel),
         };
         break;
       
@@ -138,6 +160,8 @@ export class DatabaseFactory {
     user: UserRepository;
     session: SessionRepository;
     socialAccount: SocialAccountRepository;
+    refreshToken: RefreshTokenRepository;
+    emailTokens: EmailTokenRepository;
   } | null {
     const connectionKey = this.getConnectionKey(config);
     return this.repositories.get(connectionKey) || null;
@@ -286,15 +310,8 @@ export class DatabaseFactory {
       throw new Error('No active database connection');
     }
 
-    // For now, this is a simplified implementation
-    // In a real implementation, this would use the actual transaction API of the database
-    try {
-      const result = await callback(null as unknown as import('sequelize').Transaction | import('mongoose').ClientSession); // Mock transaction object
-      return result;
-    } catch (error) {
-      // In a real implementation, this would rollback the transaction
-      throw error;
-    }
+    // Delegate to the actual connection's transaction method
+    return await connection.transaction(callback);
   }
 
   /**
@@ -340,6 +357,36 @@ export class DatabaseFactory {
       throw new Error('Database not initialized. Call initialize() first.');
     }
     return repositories.socialAccount;
+  }
+
+  /**
+   * Get refresh token repository for the default configuration
+   */
+  getRefreshTokenRepository(config?: DatabaseConfig): RefreshTokenRepository {
+    if (!config && !this.currentConfig) {
+      throw new Error('Database not initialized. Call initialize() first.');
+    }
+    const dbConfig = config || this.currentConfig!;
+    const repositories = this.getRepositories(dbConfig);
+    if (!repositories) {
+      throw new Error('Database not initialized. Call initialize() first.');
+    }
+    return repositories.refreshToken;
+  }
+
+  /**
+   * Get email token repository for the default configuration
+   */
+  getEmailTokenRepository(config?: DatabaseConfig): EmailTokenRepository {
+    if (!config && !this.currentConfig) {
+      throw new Error('Database not initialized. Call initialize() first.');
+    }
+    const dbConfig = config || this.currentConfig!;
+    const repositories = this.getRepositories(dbConfig);
+    if (!repositories) {
+      throw new Error('Database not initialized. Call initialize() first.');
+    }
+    return repositories.emailTokens;
   }
 
   /**
@@ -430,53 +477,7 @@ export class DatabaseFactory {
    * Creates database configuration from environment variables
    */
   static createConfigFromEnv(): DatabaseConfig {
-    const provider = process.env.DATABASE_PROVIDER as DatabaseProvider;
-    
-    if (!provider) {
-      throw new Error('DATABASE_PROVIDER environment variable is required');
-    }
-
-    const baseConfig = {
-      provider,
-      ssl: process.env.DATABASE_SSL === 'true',
-      logging: process.env.DATABASE_LOGGING === 'true',
-      pool: {
-        min: parseInt(process.env.DATABASE_POOL_MIN || '0'),
-        max: parseInt(process.env.DATABASE_POOL_MAX || '10'),
-        idle: parseInt(process.env.DATABASE_POOL_IDLE || '10000'),
-        acquire: parseInt(process.env.DATABASE_POOL_ACQUIRE || '60000'),
-        evict: parseInt(process.env.DATABASE_POOL_EVICT || '1000')
-      }
-    };
-
-    switch (provider) {
-      case DatabaseProvider.POSTGRESQL:
-      case DatabaseProvider.MYSQL:
-        return {
-          ...baseConfig,
-          host: process.env.DATABASE_HOST || 'localhost',
-          port: parseInt(process.env.DATABASE_PORT || (provider === DatabaseProvider.POSTGRESQL ? '5432' : '3306')),
-          database: process.env.DATABASE_NAME || 'nextauth',
-          username: process.env.DATABASE_USERNAME || 'root',
-          password: process.env.DATABASE_PASSWORD || '',
-          schema: process.env.DATABASE_SCHEMA
-        };
-      
-      case DatabaseProvider.MONGODB:
-        return {
-          ...baseConfig,
-          url: process.env.DATABASE_URL,
-          host: process.env.DATABASE_HOST || 'localhost',
-          port: parseInt(process.env.DATABASE_PORT || '27017'),
-          database: process.env.DATABASE_NAME || 'nextauth',
-          username: process.env.DATABASE_USERNAME,
-          password: process.env.DATABASE_PASSWORD,
-          authSource: process.env.DATABASE_AUTH_SOURCE || 'admin'
-        };
-      
-      default:
-        throw new Error(`Unsupported database provider: ${provider}`);
-    }
+    return DatabaseConfigManager.getInstance().createConfigFromEnvironment();
   }
 
   /**
