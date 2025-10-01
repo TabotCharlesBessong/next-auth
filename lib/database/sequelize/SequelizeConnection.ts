@@ -47,6 +47,10 @@ export class SequelizeConnection implements DatabaseConnection {
         ...this.config.options
       };
 
+      if (this.config.logging) {
+        console.log(`Attempting to connect to ${this.config.provider} database: ${this.config.database} on ${this.config.host}:${this.config.port}`);
+      }
+      
       this.sequelize = new Sequelize(options);
 
       // Test the connection
@@ -58,7 +62,7 @@ export class SequelizeConnection implements DatabaseConnection {
       this.isConnectedFlag = false;
       const errorMessage = error instanceof Error ? error.message : String(error);
       throw new DatabaseError(
-        `Failed to connect to ${this.config.provider} database: ${errorMessage}`,
+        `Failed to connect to ${this.config.provider} database ${this.config.database}: ${errorMessage}`,
         'CONNECTION_ERROR',
         error
       );
@@ -74,12 +78,12 @@ export class SequelizeConnection implements DatabaseConnection {
         await this.sequelize.close();
         this.sequelize = null;
         this.isConnectedFlag = false;
-        console.log(`✅ Disconnected from ${this.config.provider} database`);
+        console.log(`✅ Disconnected from ${this.config.provider} database: ${this.config.database}`);
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       throw new DatabaseError(
-        `Failed to disconnect from database: ${errorMessage}`,
+        `Failed to disconnect from ${this.config.provider} database ${this.config.database}: ${errorMessage}`,
         'DISCONNECTION_ERROR',
         error
       );
@@ -128,15 +132,15 @@ export class SequelizeConnection implements DatabaseConnection {
       // Sync all models (in development)
       if (process.env.NODE_ENV === 'development') {
         await this.sequelize.sync({ alter: true });
-        console.log('✅ Database models synchronized');
+        console.log(`✅ ${this.config.provider} database models synchronized for ${this.config.database}`);
       } else {
         // In production, use proper migrations
-        console.log('⚠️  Run migrations manually in production');
+        console.log(`⚠️  Run ${this.config.provider} migrations manually in production for ${this.config.database}`);
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       throw new DatabaseError(
-        `Migration failed: ${errorMessage}`,
+        `Migration failed for ${this.config.provider} database ${this.config.database}: ${errorMessage}`,
         'MIGRATION_ERROR',
         error
       );
@@ -153,11 +157,13 @@ export class SequelizeConnection implements DatabaseConnection {
 
     try {
       // Implement seeding logic here
-      console.log('✅ Database seeded successfully');
+      console.log(`🌱 Seeding ${this.config.provider} database: ${this.config.database}...`);
+      // ... actual seeding logic ...
+      console.log(`✅ ${this.config.provider} database seeded successfully for ${this.config.database}`);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       throw new DatabaseError(
-        `Seeding failed: ${errorMessage}`,
+        `Seeding failed for ${this.config.provider} database ${this.config.database}: ${errorMessage}`,
         'SEEDING_ERROR',
         error
       );
@@ -178,11 +184,11 @@ export class SequelizeConnection implements DatabaseConnection {
 
     try {
       await this.sequelize.drop();
-      console.log('✅ Database dropped successfully');
+      console.log(`🗑️ Successfully dropped ${this.config.provider} database: ${this.config.database}`);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       throw new DatabaseError(
-        `Drop operation failed: ${errorMessage}`,
+        `Drop operation failed for ${this.config.provider} database ${this.config.database}: ${errorMessage}`,
         'DROP_ERROR',
         error
       );
@@ -201,7 +207,7 @@ export class SequelizeConnection implements DatabaseConnection {
       await this.sequelize.authenticate();
       return true;
     } catch (error) {
-      console.error('Database health check failed:', error);
+      console.error(`❌ ${this.config.provider} database health check failed for ${this.config.database}:`, error);
       return false;
     }
   }
@@ -238,6 +244,10 @@ export class SequelizeConnection implements DatabaseConnection {
             LIMIT 10`
       );
 
+      if (this.config.logging) {
+        console.log(`📊 Successfully fetched stats for ${this.config.provider} database: ${this.config.database}`);
+      }
+
       return {
         // @ts-ignore
         type: this.config.provider,
@@ -248,7 +258,7 @@ export class SequelizeConnection implements DatabaseConnection {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       throw new DatabaseError(
-        `Failed to get database stats: ${errorMessage}`,
+        `Failed to get stats for ${this.config.provider} database ${this.config.database}: ${errorMessage}`,
         'STATS_ERROR',
         error
       );

@@ -50,6 +50,10 @@ export class MongooseConnection implements DatabaseConnection {
     const connectionString = this.buildConnectionString();
     const options = this.buildConnectionOptions();
 
+    if (this.config.logging) {
+      console.log(`Attempting to connect to MongoDB with connection string: ${connectionString}`);
+    }
+
     await mongoose.connect(connectionString, options);
     return mongoose.connection;
   }
@@ -183,9 +187,9 @@ export class MongooseConnection implements DatabaseConnection {
 
     try {
       await this.connection.db.dropDatabase();
-      console.log(`🗑️ Dropped database: ${this.config.database}`);
+      console.log(`🗑️ Successfully dropped database: ${this.config.database}`);
     } catch (error) {
-      this.handleConnectionError(error, 'drop database');
+      this.handleConnectionError(error, `drop database ${this.config.database}`);
     }
   }
 
@@ -194,7 +198,7 @@ export class MongooseConnection implements DatabaseConnection {
    */
   async migrate(): Promise<void> {
     try {
-      console.log('📦 Running MongoDB setup...');
+      console.log(`📦 Running MongoDB setup for database: ${this.config.database}...`);
       
       // Ensure indexes are created
       await this.createIndexes();
@@ -202,9 +206,9 @@ export class MongooseConnection implements DatabaseConnection {
       // Run any custom setup logic
       await this.setupCollections();
       
-      console.log('✅ MongoDB setup completed');
+      console.log(`✅ MongoDB setup completed for database: ${this.config.database}`);
     } catch (error) {
-      this.handleConnectionError(error, 'migrate');
+      this.handleConnectionError(error, `migrate ${this.config.database}`);
     }
   }
 
@@ -457,7 +461,7 @@ export class MongooseConnection implements DatabaseConnection {
     this.connectionPromise = null;
     
     throw new DatabaseError(
-      `MongoDB ${operation} failed: ${errorMessage}`,
+      `MongoDB ${operation} failed for database ${this.config.database}: ${errorMessage}`,
       'CONNECTION_ERROR',
       error
     );

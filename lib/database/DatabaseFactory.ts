@@ -18,7 +18,7 @@ import { SequelizeEmailTokenRepository } from './sequelize/repositories/Sequeliz
 import { MongooseEmailTokenRepository } from './mongoose/repositories/MongooseEmailTokenRepository';
 import { EmailVerificationModel as SequelizeEmailVerificationModel } from './sequelize/models';
 import { EmailVerificationModel as MongooseEmailVerificationModel } from './mongoose/models';
-import { RefreshTokenModel as SequelizeRefreshTokenModel } from './sequelize/models'; // Import Sequelize RefreshTokenModel
+import { RefreshTokenModel as SequelizeRefreshTokenModel } from './sequelize/models/RefreshToken'; // Import Sequelize RefreshTokenModel
 // import { RefreshTokenModel as MongooseRefreshTokenModel } from './mongoose/models';   // Import Mongoose RefreshTokenModel
 import { RefreshTokenModel as MongooseRefreshTokenModel } from "./mongoose/models/RefreshToken"
 
